@@ -10,7 +10,7 @@ from openai import OpenAI
 from .chunk import CHONKIE_AVAILABLE
 from .config import CONFIG_FILE, CONFIG_TEMPLATE, Config, find_config, load_secrets
 from .db import connect, reset
-from .embed import embed_batch, serialize_f32
+from .embed import serialize_f32
 from .filters import apply_filters, has_active_filters, parse_filters
 from .ingest import PYMUPDF_AVAILABLE, index_directory
 from .rerank import llm_rerank
@@ -87,7 +87,9 @@ def cmd_search(query: str, cfg: Config, top_k: int = 5):
         print(f"Filters: {', '.join(f'{k}={v}' for k, v in filters.items() if v)}")
 
     t0 = time.time()
-    resp = client.embeddings.create(model=cfg.embed_model, input=[clean_query], dimensions=cfg.embed_dims)
+    resp = client.embeddings.create(
+        model=cfg.embed_model, input=[clean_query], dimensions=cfg.embed_dims
+    )
     query_emb = resp.data[0].embedding
     embed_ms = (time.time() - t0) * 1000
 
@@ -129,10 +131,14 @@ def cmd_search(query: str, cfg: Config, top_k: int = 5):
 
     print(f'Query: "{clean_query}"')
     print(f"Embed: {embed_ms:.0f}ms | Vec: {vec_ms:.1f}ms | FTS: {fts_ms:.1f}ms")
-    print(f"Candidates: {len(vec_results)} vec, {len(fts_results)} fts -> {len(results)} fused\n")
+    print(
+        f"Candidates: {len(vec_results)} vec, {len(fts_results)} fts -> {len(results)} fused\n"
+    )
 
     for i, r in enumerate(results):
-        sim = f"sim:{r['similarity']:.3f}" if r["similarity"] is not None else "fts-only"
+        sim = (
+            f"sim:{r['similarity']:.3f}" if r["similarity"] is not None else "fts-only"
+        )
         sources = []
         if r["in_vec"]:
             sources.append("vec")
@@ -140,7 +146,9 @@ def cmd_search(query: str, cfg: Config, top_k: int = 5):
             sources.append("fts")
         source_tag = "+".join(sources)
 
-        print(f"--- [{i + 1}] {r['doc_path']} ({sim}, {source_tag}, rrf:{r['rrf_score']:.4f}) ---")
+        print(
+            f"--- [{i + 1}] {r['doc_path']} ({sim}, {source_tag}, rrf:{r['rrf_score']:.4f}) ---"
+        )
         if r["heading"]:
             print(f"    Section: {r['heading']}")
         preview = (r["text"] or "")[:300].replace("\n", "\n    ")
@@ -168,7 +176,9 @@ def cmd_ask(question: str, cfg: Config, top_k: int = 8):
         print(f"Filters: {', '.join(f'{k}={v}' for k, v in filters.items() if v)}")
 
     t0 = time.time()
-    resp = client.embeddings.create(model=cfg.embed_model, input=[clean_question], dimensions=cfg.embed_dims)
+    resp = client.embeddings.create(
+        model=cfg.embed_model, input=[clean_question], dimensions=cfg.embed_dims
+    )
     query_emb = resp.data[0].embedding
     embed_ms = (time.time() - t0) * 1000
 
@@ -210,7 +220,9 @@ def cmd_ask(question: str, cfg: Config, top_k: int = 8):
         results = llm_rerank(client, clean_question, results, cfg)
 
     filtered = [
-        r for r in results if r["similarity"] is None or r["similarity"] >= cfg.min_similarity
+        r
+        for r in results
+        if r["similarity"] is None or r["similarity"] >= cfg.min_similarity
     ]
 
     if not filtered:
@@ -223,7 +235,11 @@ def cmd_ask(question: str, cfg: Config, top_k: int = 8):
     context_parts = []
     sources = []
     for i, r in enumerate(filtered):
-        sim = f"relevance: {r['similarity']:.2f}" if r["similarity"] is not None else "keyword match"
+        sim = (
+            f"relevance: {r['similarity']:.2f}"
+            if r["similarity"] is not None
+            else "keyword match"
+        )
         label = f"[{i + 1}] {r['doc_path']}"
         if r["heading"]:
             label += f" > {r['heading']}"
@@ -258,11 +274,13 @@ def cmd_ask(question: str, cfg: Config, top_k: int = 8):
     tokens = chat_resp.usage
 
     print(f"Q: {clean_question}")
-    print(f"(embed: {embed_ms:.0f}ms | search: {vec_ms + fts_ms:.1f}ms | generate: {gen_ms:.0f}ms)")
+    print(
+        f"(embed: {embed_ms:.0f}ms | search: {vec_ms + fts_ms:.1f}ms | generate: {gen_ms:.0f}ms)"
+    )
     print(f"(tokens: {tokens.prompt_tokens} in / {tokens.completion_tokens} out)")
     print(f"(results: {len(results)} retrieved, {len(filtered)} above threshold)\n")
     print(answer)
-    print(f"\n--- Sources ---")
+    print("\n--- Sources ---")
     for s in sources:
         print(f"  {s}")
 
@@ -279,7 +297,9 @@ def cmd_stats(cfg: Config):
     doc_count = conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
     chunk_count = conn.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
     vec_count = conn.execute("SELECT COUNT(*) FROM vec_chunks").fetchone()[0]
-    total_chars = conn.execute("SELECT COALESCE(SUM(char_count), 0) FROM chunks").fetchone()[0]
+    total_chars = conn.execute(
+        "SELECT COALESCE(SUM(char_count), 0) FROM chunks"
+    ).fetchone()[0]
 
     fts_count = 0
     try:
@@ -300,13 +320,19 @@ def cmd_stats(cfg: Config):
     print(f"Chunks: {chunk_count} | Vectors: {vec_count} | FTS entries: {fts_count}")
     print(f"Total text: {total_chars:,} chars (~{total_chars // 4:,} tokens)")
 
-    print(f"\nCapabilities:")
-    print(f"  chonkie chunking: {'yes' if CHONKIE_AVAILABLE else 'no (pip install chonkie)'}")
-    print(f"  PDF ingestion:    {'yes' if PYMUPDF_AVAILABLE else 'no (pip install pymupdf)'}")
-    print(f"  LLM rerank:       yes (ask mode, top-{cfg.rerank_fetch_k} -> top-{cfg.rerank_top_k})")
-    print(f'  Pre-search filters: yes (file:, dt>, dt<, +"kw", -"kw")')
+    print("\nCapabilities:")
+    print(
+        f"  chonkie chunking: {'yes' if CHONKIE_AVAILABLE else 'no (pip install chonkie)'}"
+    )
+    print(
+        f"  PDF ingestion:    {'yes' if PYMUPDF_AVAILABLE else 'no (pip install pymupdf)'}"
+    )
+    print(
+        f"  LLM rerank:       yes (ask mode, top-{cfg.rerank_fetch_k} -> top-{cfg.rerank_top_k})"
+    )
+    print('  Pre-search filters: yes (file:, dt>, dt<, +"kw", -"kw")')
 
-    print(f"\nDocuments:")
+    print("\nDocuments:")
     for row in conn.execute(
         "SELECT path, title, type, chunk_count, content_hash, indexed_at FROM documents ORDER BY path"
     ):

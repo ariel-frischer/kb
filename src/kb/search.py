@@ -43,17 +43,19 @@ def rrf_fuse(
     results = []
     for chunk_id, rrf_score in ranked:
         data = vec_data.get(chunk_id)
-        results.append({
-            "chunk_id": chunk_id,
-            "rrf_score": rrf_score,
-            "distance": data["distance"] if data else None,
-            "similarity": (1 - data["distance"]) if data else None,
-            "text": data["text"] if data else None,
-            "doc_path": data["doc_path"] if data else None,
-            "heading": data["heading"] if data else None,
-            "in_fts": chunk_id in fts_ids,
-            "in_vec": data is not None,
-        })
+        results.append(
+            {
+                "chunk_id": chunk_id,
+                "rrf_score": rrf_score,
+                "distance": data["distance"] if data else None,
+                "similarity": (1 - data["distance"]) if data else None,
+                "text": data["text"] if data else None,
+                "doc_path": data["doc_path"] if data else None,
+                "heading": data["heading"] if data else None,
+                "in_fts": chunk_id in fts_ids,
+                "in_vec": data is not None,
+            }
+        )
 
     return results
 

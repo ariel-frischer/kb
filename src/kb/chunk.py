@@ -63,7 +63,9 @@ def _chunk_markdown_chonkie(text: str, cfg: Config) -> list[dict]:
         if len(chunk_text) < cfg.min_chunk_chars:
             continue
         heading, ancestry = _extract_heading_ancestry(chunk_text)
-        chunks.append({"text": chunk_text, "heading": heading, "heading_ancestry": ancestry})
+        chunks.append(
+            {"text": chunk_text, "heading": heading, "heading_ancestry": ancestry}
+        )
 
     return chunks
 
@@ -105,7 +107,9 @@ def _chunk_markdown_regex(text: str, cfg: Config) -> list[dict]:
     return [c for c in chunks if len(c["text"]) >= cfg.min_chunk_chars]
 
 
-def _split_section(text: str, heading: str | None, ancestry: str, cfg: Config) -> list[dict]:
+def _split_section(
+    text: str, heading: str | None, ancestry: str, cfg: Config
+) -> list[dict]:
     """Split oversized section by paragraphs."""
     base = {"heading": heading, "heading_ancestry": ancestry}
 
@@ -154,13 +158,17 @@ def chunk_plain_text(text: str, cfg: Config) -> list[dict]:
     for para in paragraphs:
         if len(current) + len(para) > cfg.max_chunk_chars and current:
             if len(current.strip()) >= cfg.min_chunk_chars:
-                chunks.append({"text": current.strip(), "heading": None, "heading_ancestry": ""})
+                chunks.append(
+                    {"text": current.strip(), "heading": None, "heading_ancestry": ""}
+                )
             current = para
         else:
             current = current + "\n\n" + para if current else para
 
     if current.strip() and len(current.strip()) >= cfg.min_chunk_chars:
-        chunks.append({"text": current.strip(), "heading": None, "heading_ancestry": ""})
+        chunks.append(
+            {"text": current.strip(), "heading": None, "heading_ancestry": ""}
+        )
 
     return chunks
 

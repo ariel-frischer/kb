@@ -56,7 +56,9 @@ kb stats                  Show index stats + capabilities
 kb reset                  Drop DB and start fresh
 ```
 
-## .kb.toml
+## Configuration
+
+### .kb.toml
 
 Created by `kb init`. Config is found by walking up from cwd (like `.gitignore`).
 
@@ -80,7 +82,7 @@ sources = [
 # rerank_top_k = 5
 ```
 
-## .kbignore
+### .kbignore
 
 Drop a `.kbignore` in any source directory. Gitignore-style syntax:
 
@@ -93,6 +95,16 @@ drafts/
 *.draft.md
 WIP-*
 ```
+
+### secrets.yaml
+
+Optionally store API keys in `~/.config/kb/secrets.yaml` instead of environment variables:
+
+```yaml
+openai_api_key: sk-...
+```
+
+Keys are loaded as uppercase environment variables. Existing env vars take precedence.
 
 ## Search Filters
 
@@ -115,22 +127,13 @@ kb ask 'file:briefs/*.pdf dt>"2026-02-13" what are the costs?'
 
 ## Features
 
-### Always on
-
 - **Hybrid search** — vector similarity + FTS5 keyword search, fused with Reciprocal Rank Fusion
 - **Heading-aware chunking** — markdown split by heading hierarchy, each chunk carries ancestry
 - **Incremental indexing** — content-hash per chunk, only re-embeds changes
-- **Auxiliary columns** — vec0 stores text alongside vectors, no JOINs at search time
-- **Confidence threshold** — `ask` filters low-similarity results before LLM
-- **LLM rerank** — `ask` over-fetches 20 results, LLM ranks by relevance, keeps top 5
-- **Pre-search filters** — inline filter syntax in queries
-
-### Auto-enabled with extras
-
-| Feature | Install | Without it |
-|---|---|---|
-| chonkie chunking | `kb[chunking]` or `kb[all]` | Falls back to regex splitter |
-| PDF ingestion | `kb[pdf]` or `kb[all]` | PDFs skipped |
+- **LLM rerank** — `ask` over-fetches candidates, LLM ranks by relevance, keeps the best
+- **Pre-search filters** — file globs, date ranges, keyword inclusion/exclusion
+- **PDF support** — install with `kb[pdf]` or `kb[all]`
+- **Pluggable chunking** — uses [chonkie](https://github.com/bhavnicksm/chonkie) when available, regex fallback otherwise
 
 ## How It Works
 
@@ -159,25 +162,11 @@ kb ask "question"
   5. LLM generates answer from context
 ```
 
-## Development
-
-```bash
-git clone https://github.com/arielfrischer/kb.git
-cd kb
-uv sync --all-extras
-uv run pytest
-uv run ruff check .
-```
-
 ## Contributing
 
 Contributions welcome! Please open an issue first to discuss what you'd like to change.
 
-1. Fork the repo
-2. Create a feature branch (`git checkout -b feat/my-feature`)
-3. Make your changes and add tests
-4. Run `uv run pytest && uv run ruff check .`
-5. Open a PR
+See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for setup, architecture, and workflow.
 
 ## License
 

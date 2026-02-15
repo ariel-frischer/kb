@@ -94,7 +94,9 @@ def find_config() -> Config:
         if cfg_path.is_file():
             with open(cfg_path, "rb") as f:
                 data = tomllib.load(f)
-            cfg = Config(**{k: v for k, v in data.items() if k in Config.__dataclass_fields__})
+            cfg = Config(
+                **{k: v for k, v in data.items() if k in Config.__dataclass_fields__}
+            )
             cfg.config_dir = parent
             cfg.db_path = parent / cfg.db
             return cfg

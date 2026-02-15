@@ -137,11 +137,21 @@ def _index_file(
                 "INSERT INTO chunks "
                 "(doc_id, chunk_index, text, heading, heading_ancestry, char_count, content_hash) "
                 "VALUES (?,?,?,?,?,?,?)",
-                (doc_id, i, chunk["text"], chunk["heading"], ancestry, len(chunk["text"]), chunk_hash),
+                (
+                    doc_id,
+                    i,
+                    chunk["text"],
+                    chunk["heading"],
+                    ancestry,
+                    len(chunk["text"]),
+                    chunk_hash,
+                ),
             )
             cid = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
             embed_input = embedding_text(chunk["text"], ancestry, rel_path)
-            to_embed.append((embed_input, cid, chunk["text"], rel_path, chunk.get("heading") or ""))
+            to_embed.append(
+                (embed_input, cid, chunk["text"], rel_path, chunk.get("heading") or "")
+            )
 
     orphans = set(existing.keys()) - new_hashes
     for h in orphans:
@@ -204,7 +214,9 @@ def index_directory(dir_path: Path, cfg: Config):
         if len(text.strip()) < cfg.min_chunk_chars:
             continue
 
-        did_index, reused = _index_file(conn, rel_path, text, md_file.stat().st_size, "markdown", to_embed, cfg)
+        did_index, reused = _index_file(
+            conn, rel_path, text, md_file.stat().st_size, "markdown", to_embed, cfg
+        )
         if did_index:
             indexed += 1
             chunks_reused += reused
@@ -225,7 +237,9 @@ def index_directory(dir_path: Path, cfg: Config):
         if len(text.strip()) < cfg.min_chunk_chars:
             continue
 
-        did_index, reused = _index_file(conn, rel_path, text, pdf_file.stat().st_size, "pdf", to_embed, cfg)
+        did_index, reused = _index_file(
+            conn, rel_path, text, pdf_file.stat().st_size, "pdf", to_embed, cfg
+        )
         if did_index:
             indexed += 1
             chunks_reused += reused
@@ -267,7 +281,7 @@ def index_directory(dir_path: Path, cfg: Config):
 
     total = conn.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
     elapsed = time.time() - start
-    print(f"\n--- Indexing complete ---")
+    print("\n--- Indexing complete ---")
     print(f"Files: {indexed} indexed, {skipped} skipped")
     print(f"Chunks: {len(to_embed)} embedded, {chunks_reused} reused, {total} total")
     print(f"Time: {elapsed:.2f}s")

@@ -12,5 +12,7 @@ def serialize_f32(vec: list[float]) -> bytes:
 
 
 def embed_batch(client: OpenAI, texts: list[str], cfg: Config) -> list[list[float]]:
-    resp = client.embeddings.create(model=cfg.embed_model, input=texts, dimensions=cfg.embed_dims)
+    resp = client.embeddings.create(
+        model=cfg.embed_model, input=texts, dimensions=cfg.embed_dims
+    )
     return [d.embedding for d in resp.data]

@@ -1,18 +1,26 @@
 # kb
 
+[![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+
 CLI knowledge base: index markdown + PDFs, hybrid search (semantic + keyword), RAG answers. Powered by [sqlite-vec](https://github.com/asg017/sqlite-vec).
 
 ## Install
 
 ```bash
-# With all features (recommended)
-uv tool install "kb[all]" --from /path/to/kb
+# From PyPI (with all features)
+pip install "kb[all]"
 
-# Or minimal (no chonkie chunking, no PDF support)
-uv tool install kb --from /path/to/kb
+# Or with uv
+uv tool install "kb[all]"
+
+# From source
+git clone https://github.com/arielfrischer/kb.git
+cd kb
+uv tool install ".[all]"
 ```
 
-Requires `OPENAI_API_KEY` in your environment.
+Requires `OPENAI_API_KEY` in your environment (or in `~/.config/kb/secrets.yaml`).
 
 ## Quickstart
 
@@ -150,3 +158,27 @@ kb ask "question"
   4. Confidence threshold
   5. LLM generates answer from context
 ```
+
+## Development
+
+```bash
+git clone https://github.com/arielfrischer/kb.git
+cd kb
+uv sync --all-extras
+uv run pytest
+uv run ruff check .
+```
+
+## Contributing
+
+Contributions welcome! Please open an issue first to discuss what you'd like to change.
+
+1. Fork the repo
+2. Create a feature branch (`git checkout -b feat/my-feature`)
+3. Make your changes and add tests
+4. Run `uv run pytest && uv run ruff check .`
+5. Open a PR
+
+## License
+
+[MIT](LICENSE)

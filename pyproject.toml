@@ -3,10 +3,22 @@ name = "kb"
 version = "0.1.0"
 description = "CLI knowledge base: index markdown + PDFs, hybrid search, RAG answers. Powered by sqlite-vec."
 readme = "README.md"
+license = "MIT"
 authors = [
     { name = "Ariel Frischer", email = "arielfrischer@gmail.com" }
 ]
 requires-python = ">=3.12"
+keywords = ["knowledge-base", "rag", "search", "sqlite", "embeddings", "cli"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Text Processing :: Indexing",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
 dependencies = [
     "sqlite-vec",
     "openai",
@@ -23,6 +35,11 @@ pdf = ["pymupdf"]
 
 [project.scripts]
 kb = "kb.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/arielfrischer/kb"
+Repository = "https://github.com/arielfrischer/kb"
+Issues = "https://github.com/arielfrischer/kb/issues"
 
 [build-system]
 requires = ["uv_build>=0.9.17,<0.10.0"]

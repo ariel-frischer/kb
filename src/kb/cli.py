@@ -8,7 +8,7 @@ from pathlib import Path
 from openai import OpenAI
 
 from .chunk import CHONKIE_AVAILABLE
-from .config import CONFIG_FILE, CONFIG_TEMPLATE, Config, find_config
+from .config import CONFIG_FILE, CONFIG_TEMPLATE, Config, find_config, load_secrets
 from .db import connect, reset
 from .embed import embed_batch, serialize_f32
 from .filters import apply_filters, has_active_filters, parse_filters
@@ -318,6 +318,7 @@ def cmd_stats(cfg: Config):
 
 
 def main():
+    load_secrets()
     args = sys.argv[1:]
 
     if not args:

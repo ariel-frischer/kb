@@ -10,6 +10,7 @@ requires-python = ">=3.12"
 dependencies = [
     "sqlite-vec",
     "openai",
+    "pyyaml",
 ]
 
 [project.optional-dependencies]

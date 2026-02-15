@@ -1,10 +1,14 @@
-"""Configuration loading from .kb.toml."""
+"""Configuration loading from .kb.toml and ~/.config/kb/secrets.yaml."""
 
+import os
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import yaml
+
 CONFIG_FILE = ".kb.toml"
+SECRETS_PATH = Path.home() / ".config" / "kb" / "secrets.yaml"
 SCHEMA_VERSION = 3
 
 CONFIG_TEMPLATE = """\
@@ -62,6 +66,24 @@ class Config:
         if not self.config_dir:
             return []
         return [self.config_dir / s for s in self.sources]
+
+
+def load_secrets() -> None:
+    """Load API keys from ~/.config/kb/secrets.yaml into env vars.
+
+    Existing env vars take precedence (never overwrite).
+    Creates the config dir if it doesn't exist.
+    """
+    if not SECRETS_PATH.is_file():
+        return
+    with open(SECRETS_PATH) as f:
+        data = yaml.safe_load(f)
+    if not isinstance(data, dict):
+        return
+    for key, value in data.items():
+        env_key = key.upper()
+        if env_key not in os.environ:
+            os.environ[env_key] = str(value)
 
 
 def find_config() -> Config:

@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-REPO="https://gitlab.com/ariel-frischer/kb.git"
+REPO="https://github.com/ariel-frischer/kb.git"
 
 main() {
     echo "Installing kb..."

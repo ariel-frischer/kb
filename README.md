@@ -22,18 +22,18 @@ CLI RAG tool for your docs. Index 30+ document formats (markdown, PDF, DOCX, EPU
 
 ```bash
 # One-liner (installs uv if needed)
-curl -LsSf https://gitlab.com/ariel-frischer/kb/-/raw/main/install.sh | sh
+curl -LsSf https://github.com/ariel-frischer/kb/raw/main/install.sh | sh
 
 # Or with uv directly (all optional deps: PDF, Office, RTF, chunking)
-uv tool install --from "git+https://gitlab.com/ariel-frischer/kb.git" "kb[all]"
+uv tool install --from "git+https://github.com/ariel-frischer/kb.git" "kb[all]"
 
 # Minimal (markdown, HTML, plain text, email, EPUB, ODT — no extra deps)
-uv tool install --from "git+https://gitlab.com/ariel-frischer/kb.git" kb
+uv tool install --from "git+https://github.com/ariel-frischer/kb.git" kb
 
 # Pick extras individually
-uv tool install --from "git+https://gitlab.com/ariel-frischer/kb.git" "kb[pdf]"       # + PDF
-uv tool install --from "git+https://gitlab.com/ariel-frischer/kb.git" "kb[office]"    # + DOCX, PPTX, XLSX
-uv tool install --from "git+https://gitlab.com/ariel-frischer/kb.git" "kb[rtf]"       # + RTF
+uv tool install --from "git+https://github.com/ariel-frischer/kb.git" "kb[pdf]"       # + PDF
+uv tool install --from "git+https://github.com/ariel-frischer/kb.git" "kb[office]"    # + DOCX, PPTX, XLSX
+uv tool install --from "git+https://github.com/ariel-frischer/kb.git" "kb[rtf]"       # + RTF
 ```
 
 Requires an OpenAI-compatible API. Set `OPENAI_API_KEY` in your environment (or in `~/.config/kb/secrets.toml`).

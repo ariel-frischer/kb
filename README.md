@@ -11,7 +11,9 @@ CLI RAG tool for your docs. Index 30+ document formats (markdown, PDF, DOCX, EPU
 - **Heading-aware chunking** — markdown split by heading hierarchy, each chunk carries ancestry
 - **Incremental indexing** — content-hash per chunk, only re-embeds changes
 - **LLM rerank** — `ask` over-fetches candidates, LLM ranks by relevance, keeps the best
-- **Pre-search filters** — file globs, date ranges, keyword inclusion/exclusion
+- **Pre-search filters** — file globs, document type, tags, date ranges, keyword inclusion/exclusion
+- **Document tagging** — manual tags via `kb tag`, auto-parsed from markdown frontmatter
+- **Similar documents** — find related docs using stored embeddings (no API call)
 - **30+ formats** — markdown, PDF, DOCX, PPTX, XLSX, EPUB, HTML, ODT, ODS, ODP, RTF, email (.eml), subtitles (.srt/.vtt), and plain text variants (.txt, .rst, .org, .csv, .json, .yaml, .tex, etc.)
 - **Optional code indexing** — set `index_code = true` to also index source code files (.py, .js, .ts, .go, .rs, etc.)
 - **Pluggable chunking** — uses [chonkie](https://github.com/bhavnicksm/chonkie) when available, regex fallback otherwise
@@ -56,23 +58,45 @@ kb search "deployment patterns"
 # 5. Ask (RAG: search → rerank → answer)
 kb ask "what are the recommended deployment patterns?"
 
-# 6. Check what's indexed
+# 6. List indexed documents
+kb list
+
+# 7. Check what's indexed
 kb stats
 ```
 
 ## Commands
 
 ```
-kb init                   Create global config (~/.config/kb/)
-kb init --project         Create project-local .kb.toml in current directory
-kb add <dir> [dir...]     Add source directories
-kb remove <dir> [dir...]  Remove source directories
-kb sources                List configured sources
-kb index [DIR...]         Index sources from config (or explicit dirs)
-kb search "query" [k]     Hybrid search (default k=5)
-kb ask "question" [k]     RAG answer (search + rerank + generate, default k=8)
-kb stats                  Show index stats + capabilities
-kb reset                  Drop DB and start fresh
+kb init                        Create global config (~/.config/kb/)
+kb init --project              Create project-local .kb.toml in current directory
+kb add <dir> [dir...]          Add source directories
+kb remove <dir> [dir...]       Remove source directories
+kb sources                     List configured sources
+kb index [DIR...]              Index sources from config (or explicit dirs)
+kb search "query" [k]          Hybrid search (default k=5)
+kb ask "question" [k]          RAG answer (search + rerank + generate, default k=8)
+kb list                        List indexed documents with metadata
+kb similar <file> [k]          Find similar documents (no API call, default k=10)
+kb tag <file> tag1 [tag2...]   Add tags to a document
+kb untag <file> tag1 [tag2...]  Remove tags from a document
+kb tags                        List all tags with document counts
+kb stats                       Show index stats + capabilities
+kb reset                       Drop DB and start fresh
+kb completion <shell>          Output shell completions (zsh, bash, fish)
+```
+
+### Shell completions
+
+```bash
+# Zsh (add to ~/.zshrc)
+eval "$(kb completion zsh)"
+
+# Bash (add to ~/.bashrc)
+eval "$(kb completion bash)"
+
+# Fish (add to ~/.config/fish/config.fish)
+kb completion fish | source
 ```
 
 ## Configuration
@@ -144,6 +168,8 @@ Add inline with your query — stripped before embedding:
 
 ```bash
 kb search 'file:articles/*.md cost optimization'
+kb search 'type:pdf machine learning'
+kb search 'tag:python tutorial basics'
 kb search 'dt>"2026-02-01" recent developments'
 kb search '+"docker" -"kubernetes" container setup'
 kb ask 'file:briefs/*.pdf dt>"2026-02-13" what are the costs?'
@@ -152,10 +178,29 @@ kb ask 'file:briefs/*.pdf dt>"2026-02-13" what are the costs?'
 | Filter | Syntax | Example |
 |---|---|---|
 | File glob | `file:<pattern>` | `file:articles/*.md` |
+| Document type | `type:<type>` | `type:markdown`, `type:pdf` |
+| Tag | `tag:<name>` | `tag:python` |
 | After date | `dt>"YYYY-MM-DD"` | `dt>"2026-02-01"` |
 | Before date | `dt<"YYYY-MM-DD"` | `dt<"2026-02-14"` |
 | Must contain | `+"keyword"` | `+"docker"` |
 | Must not contain | `-"keyword"` | `-"kubernetes"` |
+
+## Tags
+
+Tag documents manually or let `kb index` auto-parse tags from markdown frontmatter:
+
+```yaml
+---
+tags: [python, tutorial]
+---
+```
+
+```bash
+kb tag docs/guide.md python tutorial   # add tags manually
+kb untag docs/guide.md tutorial        # remove a tag
+kb tags                                # list all tags with counts
+kb search 'tag:python basics'          # filter by tag in search
+```
 
 ## Supported Formats
 

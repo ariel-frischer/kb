@@ -130,7 +130,7 @@ class TestIndexDirectory:
 class TestOrphanChunkCleanup:
     def test_removes_orphaned_chunks(self, tmp_path):
         """When a file is re-indexed with fewer chunks, old chunks are deleted."""
-        cfg = _make_cfg(tmp_path)
+        cfg = _make_cfg(tmp_path, max_chunk_chars=80)
         conn = connect(cfg)
 
         # Index a file with 2 sections

@@ -171,6 +171,8 @@ class TestIndexFile:
 
     def test_reuses_unchanged_chunks(self, index_setup):
         conn, cfg = index_setup
+        # Use small chunk size so each heading section becomes its own chunk
+        cfg.max_chunk_chars = 80
         shared_section = "## Shared\n\nParagraph that stays the same across versions of the document."
         to_embed = []
         _index_file(

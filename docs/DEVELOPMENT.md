@@ -31,16 +31,16 @@ uv run kb --help        # run locally
 
 ```
 src/kb/
-├── cli.py       — Entry point, command dispatch (init, index, search, ask, stats, reset)
+├── cli.py       — Entry point, command dispatch (init, index, search, ask, similar, tag/untag/tags, list, stats, reset, completion)
 ├── config.py    — .kb.toml loading, Config dataclass, secrets.toml loading
 ├── db.py        — SQLite schema, sqlite-vec connection, migrations
 ├── chunk.py     — Markdown + plain text chunking (chonkie or regex fallback)
-├── embed.py     — OpenAI embedding helpers, batching
+├── embed.py     — OpenAI embedding helpers, batching, serialize/deserialize for sqlite-vec
 ├── extract.py   — Text extraction registry for 30+ formats (PDF, DOCX, EPUB, HTML, ODT, etc.)
 ├── search.py    — Hybrid search (vector + FTS5), RRF fusion
 ├── rerank.py    — LLM reranking (RankGPT pattern)
-├── filters.py   — Pre-search filter parsing + application
-└── ingest.py    — File indexing pipeline (unified loop over all supported formats)
+├── filters.py   — Pre-search filter parsing + application (file:, type:, tag:, dt>, dt<, +"kw", -"kw")
+└── ingest.py    — File indexing pipeline (unified loop over all supported formats, frontmatter tag parsing)
 ```
 
 ### Data flow
@@ -51,12 +51,15 @@ src/kb/
 
 **Ask** (`kb ask`): same as search but over-fetches → LLM reranks top candidates → confidence threshold → LLM generates answer from context
 
+**Similar** (`kb similar`): read chunk embeddings from vec0 → average into doc vector → KNN query → filter self → aggregate by doc → rank by similarity
+
 ### Key design decisions
 
 - **sqlite-vec `vec0` virtual table** — stores embeddings + text in auxiliary columns, avoiding JOINs at search time
 - **Reciprocal Rank Fusion** — combines vector and keyword rankings without needing score normalization
 - **Content-hash per chunk** — incremental indexing only re-embeds changed content
 - **Config walks up from cwd** — like `.gitignore`, so `kb` works from any subdirectory
+- **Tags** — comma-separated in `documents.tags` column; auto-parsed from markdown YAML frontmatter, manually managed via `kb tag`/`kb untag`
 
 ## Reference docs
 
@@ -64,9 +67,9 @@ src/kb/
 
 ## Adding a new command
 
-1. Add the function in `cli.py` following the existing pattern (parse args → load config → connect → execute)
-2. Register it in the `COMMANDS` dict at the bottom of `cli.py`
-3. Add a help line in `usage()`
+1. Add a `cmd_<name>()` function in `cli.py` following the existing pattern (parse args → load config → connect → execute)
+2. Add dispatch in `main()` — before `find_config()` if no config needed (like `completion`), in the `elif` chain otherwise
+3. Add a help line in the `USAGE` string
 
 ## Running tests
 

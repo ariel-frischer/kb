@@ -51,6 +51,7 @@ Usage:
   kb list [--full]                List indexed documents (summary; --full for details)
   kb stats                       Show index statistics and supported formats
   kb reset                       Drop database and start fresh
+  kb version                      Show version (also: kb v, kb --version)
   kb completion <shell>           Output shell completions (zsh, bash, fish)
 
 Search filters (inline with query):
@@ -849,6 +850,12 @@ def main():
 
     if cmd in ("-h", "--help", "help"):
         print(USAGE)
+        sys.exit(0)
+
+    if cmd in ("version", "v", "--version"):
+        from importlib.metadata import version
+
+        print(f"kb {version('kb')}")
         sys.exit(0)
 
     if cmd == "init":

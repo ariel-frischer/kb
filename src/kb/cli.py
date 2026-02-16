@@ -711,7 +711,15 @@ def cmd_stats(cfg: Config):
     conn.close()
 
 
-def cmd_list(cfg: Config):
+def _format_size(size: int) -> str:
+    if size >= 1_000_000:
+        return f"{size / 1_000_000:.1f} MB"
+    if size >= 1_000:
+        return f"{size / 1_000:.1f} KB"
+    return f"{size} B"
+
+
+def cmd_list(cfg: Config, full: bool = False):
     if not cfg.db_path.exists():
         print("No index found. Run 'kb index' first.")
         return
@@ -727,22 +735,38 @@ def cmd_list(cfg: Config):
         print("No documents indexed.")
         return
 
-    print(f"{len(rows)} documents indexed\n")
+    if full:
+        print(f"{len(rows)} documents indexed\n")
+        for r in rows:
+            path = r["path"]
+            doc_type = r["type"] or "unknown"
+            chunks = r["chunk_count"] or 0
+            size = r["size_bytes"] or 0
+            date = (r["indexed_at"] or "")[:10]
+            print(f"  {path:<50} {doc_type:<12} {chunks:>3} chunks  {_format_size(size):>10}  {date}")
+        return
+
+    # Summary view: count and size by type
+    type_stats: dict[str, dict] = {}
+    total_size = 0
+    total_chunks = 0
     for r in rows:
-        path = r["path"]
         doc_type = r["type"] or "unknown"
-        chunks = r["chunk_count"] or 0
         size = r["size_bytes"] or 0
-        date = (r["indexed_at"] or "")[:10]
+        chunks = r["chunk_count"] or 0
+        total_size += size
+        total_chunks += chunks
+        if doc_type not in type_stats:
+            type_stats[doc_type] = {"count": 0, "size": 0, "chunks": 0}
+        type_stats[doc_type]["count"] += 1
+        type_stats[doc_type]["size"] += size
+        type_stats[doc_type]["chunks"] += chunks
 
-        if size >= 1_000_000:
-            size_str = f"{size / 1_000_000:.1f} MB"
-        elif size >= 1_000:
-            size_str = f"{size / 1_000:.1f} KB"
-        else:
-            size_str = f"{size} B"
-
-        print(f"  {path:<50} {doc_type:<12} {chunks:>3} chunks  {size_str:>10}  {date}")
+    print(f"{len(rows)} documents indexed ({_format_size(total_size)}, {total_chunks} chunks)\n")
+    for doc_type in sorted(type_stats, key=lambda t: type_stats[t]["count"], reverse=True):
+        s = type_stats[doc_type]
+        print(f"  {doc_type:<12} {s['count']:>4} docs  {s['chunks']:>5} chunks  {_format_size(s['size']):>10}")
+    print(f"\nUse 'kb list --full' for per-file details.")
 
 
 def cmd_completion(shell: str):
@@ -879,7 +903,7 @@ def main():
     elif cmd == "tags":
         cmd_tags(cfg)
     elif cmd == "list":
-        cmd_list(cfg)
+        cmd_list(cfg, full="--full" in args)
     elif cmd == "stats":
         cmd_stats(cfg)
     elif cmd == "reset":

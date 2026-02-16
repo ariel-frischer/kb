@@ -361,8 +361,16 @@ class TestCmdList:
         cmd_list(cfg)
         assert "No documents" in capsys.readouterr().out
 
-    def test_lists_documents(self, populated_db, capsys):
+    def test_lists_documents_summary(self, populated_db, capsys):
         cmd_list(populated_db)
+        out = capsys.readouterr().out
+        assert "1 documents indexed" in out
+        assert "markdown" in out
+        assert "2 chunks" in out
+        assert "kb list --full" in out
+
+    def test_lists_documents_full(self, populated_db, capsys):
+        cmd_list(populated_db, full=True)
         out = capsys.readouterr().out
         assert "1 documents indexed" in out
         assert "docs/guide.md" in out
@@ -384,7 +392,7 @@ class TestCmdList:
         conn.commit()
         conn.close()
 
-        cmd_list(cfg)
+        cmd_list(cfg, full=True)
         out = capsys.readouterr().out
         assert "12.4 KB" in out
 
@@ -403,7 +411,7 @@ class TestCmdList:
         conn.commit()
         conn.close()
 
-        cmd_list(cfg)
+        cmd_list(cfg, full=True)
         out = capsys.readouterr().out
         assert "2.5 MB" in out
 

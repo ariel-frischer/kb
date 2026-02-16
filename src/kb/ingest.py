@@ -1,41 +1,24 @@
-"""File ingestion: indexing markdown and PDF files."""
+"""File ingestion: indexing documents across many formats."""
 
 import hashlib
 import re
 import sqlite3
 import time
+from collections import Counter
 from fnmatch import fnmatch
 from pathlib import Path
 
 from openai import OpenAI
 
-from .chunk import chunk_markdown, chunk_plain_text, embedding_text, CHONKIE_AVAILABLE
+from .chunk import CHONKIE_AVAILABLE, chunk_markdown, chunk_plain_text, embedding_text
 from .config import Config
 from .db import connect
 from .embed import embed_batch, serialize_f32
-
-try:
-    import pymupdf
-
-    PYMUPDF_AVAILABLE = True
-except ImportError:
-    PYMUPDF_AVAILABLE = False
+from .extract import extract_text, supported_extensions, unavailable_formats
 
 
 def md5_hash(text: str) -> str:
     return hashlib.md5(text.encode()).hexdigest()
-
-
-def extract_pdf_text(pdf_path: Path) -> str:
-    """Extract text from a PDF file using pymupdf."""
-    doc = pymupdf.open(str(pdf_path))
-    pages = []
-    for page in doc:
-        text = page.get_text()
-        if text.strip():
-            pages.append(text)
-    doc.close()
-    return "\n\n".join(pages)
 
 
 def _load_ignore_patterns(dir_path: Path) -> list[str]:
@@ -50,6 +33,21 @@ def _load_ignore_patterns(dir_path: Path) -> list[str]:
             print(f"  Loaded {len(patterns)} ignore patterns from {kbignore}")
             break
     return patterns
+
+
+def _check_file_size(file_path: Path, cfg: Config, dir_path: Path) -> bool:
+    """Return True if file is OK to index, False if too large."""
+    if cfg.max_file_size_mb <= 0:
+        return True
+    max_bytes = cfg.max_file_size_mb * 1024 * 1024
+    if file_path.stat().st_size <= max_bytes:
+        return True
+    rel_path = cfg.doc_path_for_db(file_path, dir_path)
+    abs_path = str(file_path.resolve())
+    for allowed in cfg.allowed_large_files:
+        if allowed == rel_path or allowed == abs_path:
+            return True
+    return False
 
 
 def _is_ignored(file_path: Path, dir_path: Path, patterns: list[str]) -> bool:
@@ -84,10 +82,10 @@ def _index_file(
 
     doc_id = row["id"] if row else None
 
-    if doc_type == "pdf":
-        chunks = chunk_plain_text(text, cfg)
-    else:
+    if doc_type == "markdown":
         chunks = chunk_markdown(text, cfg)
+    else:
+        chunks = chunk_plain_text(text, cfg)
 
     if not chunks:
         return False, 0
@@ -166,31 +164,45 @@ def _index_file(
     return True, file_reused
 
 
-def index_directory(dir_path: Path, cfg: Config):
-    """Index all markdown and PDF files in a directory."""
+def index_directory(dir_path: Path, cfg: Config, *, no_size_limit: bool = False):
+    """Index all supported document files in a directory."""
     conn = connect(cfg)
     client = OpenAI()
 
     ignore_patterns = _load_ignore_patterns(dir_path)
+    exts = supported_extensions(include_code=cfg.index_code)
 
-    all_md = sorted(dir_path.rglob("*.md"))
-    all_pdf = sorted(dir_path.rglob("*.pdf")) if PYMUPDF_AVAILABLE else []
+    # Collect files matching supported extensions
+    all_files = sorted(
+        f for f in dir_path.rglob("*") if f.is_file() and f.suffix.lower() in exts
+    )
+    files = [f for f in all_files if not _is_ignored(f, dir_path, ignore_patterns)]
 
-    md_files = [f for f in all_md if not _is_ignored(f, dir_path, ignore_patterns)]
-    pdf_files = [f for f in all_pdf if not _is_ignored(f, dir_path, ignore_patterns)]
-
-    ignored_count = (len(all_md) - len(md_files)) + (len(all_pdf) - len(pdf_files))
+    ignored_count = len(all_files) - len(files)
     if ignored_count:
         print(f"  Ignored {ignored_count} files via .kbignore")
 
-    print(f"Found {len(md_files)} markdown files", end="")
-    if pdf_files:
-        print(f" + {len(pdf_files)} PDF files", end="")
-    if not PYMUPDF_AVAILABLE:
-        pdf_count = len(sorted(dir_path.rglob("*.pdf")))
-        if pdf_count:
-            print(f" ({pdf_count} PDFs skipped - install pymupdf)", end="")
-    print(f" in {dir_path}")
+    # Count by extension for summary
+    ext_counts: Counter[str] = Counter()
+    for f in files:
+        ext_counts[f.suffix.lower()] += 1
+
+    # Print discovery summary
+    print(f"Found {len(files)} files in {dir_path}")
+    if ext_counts:
+        parts = [f"{cnt} {ext}" for ext, cnt in ext_counts.most_common()]
+        print(f"  Types: {', '.join(parts)}")
+
+    # Warn about unavailable optional formats
+    missing = unavailable_formats()
+    if missing:
+        skip_counts: Counter[str] = Counter()
+        for f in dir_path.rglob("*"):
+            if f.is_file() and f.suffix.lower() in {ext for ext, _ in missing}:
+                skip_counts[f.suffix.lower()] += 1
+        for ext, pkg in missing:
+            if ext in skip_counts:
+                print(f"  {skip_counts[ext]} {ext} files skipped (install {pkg})")
 
     if CHONKIE_AVAILABLE:
         print("  (using chonkie for chunking)")
@@ -199,36 +211,34 @@ def index_directory(dir_path: Path, cfg: Config):
     skipped = 0
     indexed = 0
     chunks_reused = 0
+    size_skipped = 0
     to_embed: list[tuple[str, int, str, str, str]] = []
 
-    for md_file in md_files:
-        rel_path = cfg.doc_path_for_db(md_file, dir_path)
-        text = md_file.read_text(errors="replace")
-        if len(text.strip()) < cfg.min_chunk_chars:
+    for file_path in files:
+        if not no_size_limit and not _check_file_size(file_path, cfg, dir_path):
+            rel = cfg.doc_path_for_db(file_path, dir_path)
+            mb = file_path.stat().st_size / (1024 * 1024)
+            print(f"  SKIP (too large): {rel} ({mb:.1f} MB > {cfg.max_file_size_mb} MB)")
+            size_skipped += 1
             continue
 
-        did_index, reused = _index_file(
-            conn, rel_path, text, md_file.stat().st_size, "markdown", to_embed, cfg
-        )
-        if did_index:
-            indexed += 1
-            chunks_reused += reused
-        else:
-            skipped += 1
+        rel_path = cfg.doc_path_for_db(file_path, dir_path)
 
-    for pdf_file in pdf_files:
-        rel_path = cfg.doc_path_for_db(pdf_file, dir_path)
         try:
-            text = extract_pdf_text(pdf_file)
+            result = extract_text(file_path, include_code=cfg.index_code)
         except Exception as e:
             print(f"  WARN: failed to extract {rel_path}: {e}")
             continue
 
+        if result is None:
+            continue
+        text, doc_type = result
+
         if len(text.strip()) < cfg.min_chunk_chars:
             continue
 
         did_index, reused = _index_file(
-            conn, rel_path, text, pdf_file.stat().st_size, "pdf", to_embed, cfg
+            conn, rel_path, text, file_path.stat().st_size, doc_type, to_embed, cfg
         )
         if did_index:
             indexed += 1
@@ -240,7 +250,8 @@ def index_directory(dir_path: Path, cfg: Config):
 
     if not to_embed and indexed == 0:
         elapsed = time.time() - start
-        print(f"\nNo changes. ({skipped} files unchanged, {elapsed:.1f}s)")
+        size_note = f", {size_skipped} too large" if size_skipped else ""
+        print(f"\nNo changes. ({skipped} files unchanged{size_note}, {elapsed:.1f}s)")
         conn.close()
         return
 
@@ -272,7 +283,8 @@ def index_directory(dir_path: Path, cfg: Config):
     total = conn.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
     elapsed = time.time() - start
     print("\n--- Indexing complete ---")
-    print(f"Files: {indexed} indexed, {skipped} skipped")
+    size_note = f", {size_skipped} too large" if size_skipped else ""
+    print(f"Files: {indexed} indexed, {skipped} unchanged{size_note}")
     print(f"Chunks: {len(to_embed)} embedded, {chunks_reused} reused, {total} total")
     print(f"Time: {elapsed:.2f}s")
     print(f"DB: {cfg.db_path} ({cfg.db_path.stat().st_size / 1024:.1f} KB)")

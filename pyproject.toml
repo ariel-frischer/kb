@@ -28,9 +28,15 @@ dependencies = [
 all = [
     "chonkie[hub]",
     "pymupdf",
+    "python-docx",
+    "python-pptx",
+    "openpyxl",
+    "striprtf",
 ]
 chunking = ["chonkie[hub]"]
 pdf = ["pymupdf"]
+office = ["python-docx", "python-pptx", "openpyxl"]
+rtf = ["striprtf"]
 
 [project.scripts]
 kb = "kb.cli:main"

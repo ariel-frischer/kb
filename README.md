@@ -3,7 +3,7 @@
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-CLI RAG tool for your docs. Index markdown + PDFs, hybrid search (semantic + keyword), ask questions and get sourced answers. Built on [sqlite-vec](https://github.com/asg017/sqlite-vec).
+CLI RAG tool for your docs. Index 30+ document formats (markdown, PDF, DOCX, EPUB, HTML, ODT, RTF, plain text, email, and more), hybrid search (semantic + keyword), ask questions and get sourced answers. Built on [sqlite-vec](https://github.com/asg017/sqlite-vec).
 
 ## Features
 
@@ -12,7 +12,8 @@ CLI RAG tool for your docs. Index markdown + PDFs, hybrid search (semantic + key
 - **Incremental indexing** — content-hash per chunk, only re-embeds changes
 - **LLM rerank** — `ask` over-fetches candidates, LLM ranks by relevance, keeps the best
 - **Pre-search filters** — file globs, date ranges, keyword inclusion/exclusion
-- **PDF support** — install with `kb[pdf]` or `kb[all]`
+- **30+ formats** — markdown, PDF, DOCX, PPTX, XLSX, EPUB, HTML, ODT, ODS, ODP, RTF, email (.eml), subtitles (.srt/.vtt), and plain text variants (.txt, .rst, .org, .csv, .json, .yaml, .tex, etc.)
+- **Optional code indexing** — set `index_code = true` to also index source code files (.py, .js, .ts, .go, .rs, etc.)
 - **Pluggable chunking** — uses [chonkie](https://github.com/bhavnicksm/chonkie) when available, regex fallback otherwise
 
 ## Install
@@ -21,8 +22,16 @@ CLI RAG tool for your docs. Index markdown + PDFs, hybrid search (semantic + key
 # One-liner (installs uv if needed)
 curl -LsSf https://gitlab.com/ariel-frischer/kb/-/raw/main/install.sh | sh
 
-# Or with uv directly
+# Or with uv directly (all optional deps: PDF, Office, RTF, chunking)
 uv tool install --from "git+https://gitlab.com/ariel-frischer/kb.git" "kb[all]"
+
+# Minimal (markdown, HTML, plain text, email, EPUB, ODT — no extra deps)
+uv tool install --from "git+https://gitlab.com/ariel-frischer/kb.git" kb
+
+# Pick extras individually
+uv tool install --from "git+https://gitlab.com/ariel-frischer/kb.git" "kb[pdf]"       # + PDF
+uv tool install --from "git+https://gitlab.com/ariel-frischer/kb.git" "kb[office]"    # + DOCX, PPTX, XLSX
+uv tool install --from "git+https://gitlab.com/ariel-frischer/kb.git" "kb[rtf]"       # + RTF
 ```
 
 Requires an OpenAI-compatible API. Set `OPENAI_API_KEY` in your environment (or in `~/.config/kb/secrets.toml`).
@@ -93,6 +102,7 @@ sources = [
 # min_similarity = 0.25
 # rerank_fetch_k = 20
 # rerank_top_k = 5
+# index_code = false       # set true to also index source code files
 ```
 
 ### .kbignore
@@ -147,16 +157,43 @@ kb ask 'file:briefs/*.pdf dt>"2026-02-13" what are the costs?'
 | Must contain | `+"keyword"` | `+"docker"` |
 | Must not contain | `-"keyword"` | `-"kubernetes"` |
 
+## Supported Formats
+
+**Always available (no extra deps):**
+
+| Category | Extensions |
+|----------|-----------|
+| Markdown | `.md`, `.markdown` |
+| Plain text | `.txt`, `.text`, `.rst`, `.org`, `.log`, `.csv`, `.tsv`, `.json`, `.yaml`, `.yml`, `.toml`, `.xml`, `.ini`, `.cfg`, `.tex`, `.latex`, `.bib`, `.nfo`, `.adoc`, `.asciidoc`, `.properties` |
+| HTML | `.html`, `.htm`, `.xhtml` |
+| Subtitles | `.srt`, `.vtt` |
+| Email | `.eml` |
+| OpenDocument | `.odt`, `.ods`, `.odp` |
+| EPUB | `.epub` |
+
+**Optional (install with extras):**
+
+| Category | Extensions | Install |
+|----------|-----------|---------|
+| PDF | `.pdf` | `kb[pdf]` or `kb[all]` |
+| Office | `.docx`, `.pptx`, `.xlsx` | `kb[office]` or `kb[all]` |
+| RTF | `.rtf` | `kb[rtf]` or `kb[all]` |
+
+**Code files (opt-in):** Set `index_code = true` in config to also index source code — `.py`, `.js`, `.ts`, `.go`, `.rs`, `.java`, `.c`, `.cpp`, and 60+ more extensions.
+
+Run `kb stats` to see which formats are available in your installation.
+
 ## How It Works
 
 ```
 kb index
-  1. Find .md + .pdf files (respecting .kbignore)
-  2. Content-hash check — skip unchanged files
-  3. Chunk (chonkie or regex fallback)
-  4. Diff chunks by hash — only embed new/changed
-  5. Batch embed via OpenAI
-  6. Store in sqlite-vec (vec0) + FTS5
+  1. Find files matching supported formats (respecting .kbignore)
+  2. Extract text (format-specific: markdown, PDF, DOCX, HTML, etc.)
+  3. Content-hash check — skip unchanged files
+  4. Chunk (chonkie or regex fallback)
+  5. Diff chunks by hash — only embed new/changed
+  6. Batch embed via OpenAI
+  7. Store in sqlite-vec (vec0) + FTS5
 
 kb search "query"
   1. Parse filters, strip from query
@@ -178,7 +215,7 @@ kb ask "question"
 
 | Tool | What it is | Local-only | CLI | Setup |
 |------|-----------|:----------:|:---:|-------|
-| **kb** | CLI RAG tool — hybrid search + Q&A over your markdown/PDFs | Yes | Yes | `uv tool install`, single SQLite file |
+| **kb** | CLI RAG tool — hybrid search + Q&A over 30+ document formats | Yes | Yes | `uv tool install`, single SQLite file |
 | [Khoj](https://github.com/khoj-ai/khoj) | Self-hosted AI second brain with web UI, mobile, Obsidian/Emacs plugins | Optional | No | Docker or pip, runs a web server |
 | [Reor](https://github.com/reorproject/reor) | Desktop note-taking app with auto-linking and local LLM | Yes | No | Electron app, uses LanceDB + Ollama |
 | [LlamaIndex](https://github.com/run-llama/llama_index) | Framework for building RAG pipelines | Depends | No | Python library, you build the app |
@@ -187,7 +224,7 @@ kb ask "question"
 
 **When to use what:**
 
-- **kb** — you want a CLI RAG tool that indexes docs (markdown, PDFs) and answers questions from them
+- **kb** — you want a CLI RAG tool that indexes docs (markdown, PDFs, DOCX, EPUB, HTML, and more) and answers questions from them
 - **grepai** — you want semantic search over code (find by intent, trace call graphs), no RAG
 - **Khoj** — you want a full-featured app with web UI, phone access, Obsidian integration, and agent capabilities
 - **Reor** — you want an Obsidian-like desktop editor that auto-links notes using local AI

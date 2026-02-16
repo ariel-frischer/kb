@@ -36,15 +36,16 @@ src/kb/
 ├── db.py        — SQLite schema, sqlite-vec connection, migrations
 ├── chunk.py     — Markdown + plain text chunking (chonkie or regex fallback)
 ├── embed.py     — OpenAI embedding helpers, batching
+├── extract.py   — Text extraction registry for 30+ formats (PDF, DOCX, EPUB, HTML, ODT, etc.)
 ├── search.py    — Hybrid search (vector + FTS5), RRF fusion
 ├── rerank.py    — LLM reranking (RankGPT pattern)
 ├── filters.py   — Pre-search filter parsing + application
-└── ingest.py    — File indexing pipeline (markdown + PDF)
+└── ingest.py    — File indexing pipeline (unified loop over all supported formats)
 ```
 
 ### Data flow
 
-**Indexing** (`kb index`): files → chunking → content-hash diff → embed new chunks → store in sqlite-vec (vec0) + FTS5
+**Indexing** (`kb index`): find files by extension → extract text (format-specific) → chunking → content-hash diff → embed new chunks → store in sqlite-vec (vec0) + FTS5
 
 **Search** (`kb search`): query → parse filters → embed → vector search + FTS5 → RRF fusion → apply filters → results
 

@@ -23,12 +23,16 @@ from .config import (
 from .db import connect, reset
 from .embed import serialize_f32
 from .filters import apply_filters, has_active_filters, parse_filters
-from .ingest import PYMUPDF_AVAILABLE, index_directory
+from .extract import supported_extensions, unavailable_formats
+from .ingest import index_directory
 from .rerank import llm_rerank
 from .search import fill_fts_only_results, fts_escape, rrf_fuse
 
 USAGE = """\
 kb — CLI knowledge base powered by sqlite-vec
+
+Indexes 30+ document formats: markdown, PDF, DOCX, EPUB, HTML, ODT, RTF,
+plain text, email, subtitles, and more. Optional: code files (index_code = true).
 
 Usage:
   kb init                        Create global config (~/.config/kb/)
@@ -36,11 +40,14 @@ Usage:
   kb add <dir> [dir...]          Add source directories
   kb remove <dir> [dir...]       Remove source directories
   kb sources                     List configured sources
-  kb index [DIR...]              Index sources from config (or explicit dirs)
+  kb index [DIR...] [--no-size-limit]  Index sources (skip files > max_file_size_mb)
+  kb allow <file>                Whitelist a large file for indexing
   kb search "query" [k]          Hybrid semantic + keyword search (default k=5)
   kb ask "question" [k]          RAG: search + LLM rerank + answer (default k=8)
-  kb stats                       Show index statistics
+  kb list                        List indexed documents
+  kb stats                       Show index statistics and supported formats
   kb reset                       Drop database and start fresh
+  kb completion <shell>           Output shell completions (zsh, bash, fish)
 
 Search filters (inline with query):
   file:articles/*.md             Glob filter on file path
@@ -146,9 +153,45 @@ def cmd_sources(cfg: Config):
         print(f"  {s}{marker}")
 
 
+def cmd_allow(cfg: Config, files: list[str]):
+    if not files:
+        print("Usage: kb allow <file> [file...]")
+        sys.exit(1)
+    if not cfg.config_path:
+        print("No config found. Run 'kb init' first.")
+        sys.exit(1)
+
+    for f in files:
+        p = Path(f).expanduser().resolve()
+        if not p.is_file():
+            print(f"Not a file: {f}")
+            sys.exit(1)
+
+        if cfg.scope == "global":
+            entry = str(p)
+        else:
+            try:
+                entry = str(p.relative_to(cfg.config_dir))
+            except ValueError:
+                entry = str(p)
+
+        if entry in cfg.allowed_large_files:
+            print(f"  Already allowed: {entry}")
+            continue
+
+        cfg.allowed_large_files.append(entry)
+        print(f"  Allowed: {entry}")
+
+    save_config(cfg)
+    print(f"Saved {cfg.config_path}")
+
+
 def cmd_index(cfg: Config, args: list[str]):
-    if args:
-        dirs = [Path(a).resolve() for a in args]
+    no_size_limit = "--no-size-limit" in args
+    dir_args = [a for a in args if a != "--no-size-limit"]
+
+    if dir_args:
+        dirs = [Path(a).resolve() for a in dir_args]
     elif cfg.source_paths:
         dirs = cfg.source_paths
     else:
@@ -161,7 +204,7 @@ def cmd_index(cfg: Config, args: list[str]):
         if not dir_path.is_dir():
             print(f"Not a directory: {dir_path}")
             sys.exit(1)
-        index_directory(dir_path, cfg)
+        index_directory(dir_path, cfg, no_size_limit=no_size_limit)
 
 
 def cmd_search(query: str, cfg: Config, top_k: int = 5):
@@ -325,19 +368,30 @@ def cmd_ask(question: str, cfg: Config, top_k: int = 8):
         return
 
     context_parts = []
-    sources = []
+    source_entries = []  # (doc_path, display_heading) for dedup
     for i, r in enumerate(filtered):
         sim = (
             f"relevance: {r['similarity']:.2f}"
             if r["similarity"] is not None
             else "keyword match"
         )
+        # Prefer heading_ancestry (full breadcrumb) from chunks table
+        ancestry = None
+        row = conn.execute(
+            "SELECT heading_ancestry FROM chunks WHERE id = ?",
+            (r["chunk_id"],),
+        ).fetchone()
+        if row and row["heading_ancestry"]:
+            ancestry = row["heading_ancestry"]
+
+        display_heading = ancestry or r["heading"] or ""
         label = f"[{i + 1}] {r['doc_path']}"
-        if r["heading"]:
-            label += f" > {r['heading']}"
+        if display_heading:
+            label += f" > {display_heading}"
         context_parts.append(f"--- Source {label} ({sim}) ---\n{r['text']}")
-        if r["doc_path"] and r["doc_path"] not in sources:
-            sources.append(r["doc_path"])
+        source_key = (r["doc_path"], display_heading)
+        if r["doc_path"] and source_key not in source_entries:
+            source_entries.append(source_key)
 
     context = "\n\n".join(context_parts)
 
@@ -373,8 +427,11 @@ def cmd_ask(question: str, cfg: Config, top_k: int = 8):
     print(f"(results: {len(results)} retrieved, {len(filtered)} above threshold)\n")
     print(answer)
     print("\n--- Sources ---")
-    for s in sources:
-        print(f"  {s}")
+    for i, (path, heading) in enumerate(source_entries, 1):
+        if heading:
+            print(f"  [{i}] {path} > {heading}")
+        else:
+            print(f"  [{i}] {path}")
 
     conn.close()
 
@@ -414,15 +471,21 @@ def cmd_stats(cfg: Config):
 
     print("\nCapabilities:")
     print(
-        f"  chonkie chunking: {'yes' if CHONKIE_AVAILABLE else 'no (pip install chonkie)'}"
+        f"  chonkie chunking:   {'yes' if CHONKIE_AVAILABLE else 'no (pip install chonkie)'}"
     )
     print(
-        f"  PDF ingestion:    {'yes' if PYMUPDF_AVAILABLE else 'no (pip install pymupdf)'}"
-    )
-    print(
-        f"  LLM rerank:       yes (ask mode, top-{cfg.rerank_fetch_k} -> top-{cfg.rerank_top_k})"
+        f"  LLM rerank:         yes (ask mode, top-{cfg.rerank_fetch_k} -> top-{cfg.rerank_top_k})"
     )
     print('  Pre-search filters: yes (file:, dt>, dt<, +"kw", -"kw")')
+    print(f"  Index code files:   {'yes' if cfg.index_code else 'no (set index_code = true)'}")
+
+    exts = sorted(supported_extensions(include_code=cfg.index_code))
+    print(f"  Supported formats:  {', '.join(exts)}")
+
+    missing = unavailable_formats()
+    if missing:
+        for ext, pkg in missing:
+            print(f"  {ext}: unavailable (pip install {pkg})")
 
     print("\nDocuments:")
     for row in conn.execute(
@@ -433,6 +496,90 @@ def cmd_stats(cfg: Config):
         print(f"  {row[0]}: {row[3]} chunks [{h}]{type_tag} ({row[1]})")
 
     conn.close()
+
+
+def cmd_list(cfg: Config):
+    if not cfg.db_path.exists():
+        print("No index found. Run 'kb index' first.")
+        return
+
+    conn = connect(cfg)
+    rows = conn.execute(
+        "SELECT path, type, chunk_count, size_bytes, indexed_at "
+        "FROM documents ORDER BY path"
+    ).fetchall()
+    conn.close()
+
+    if not rows:
+        print("No documents indexed.")
+        return
+
+    print(f"{len(rows)} documents indexed\n")
+    for r in rows:
+        path = r["path"]
+        doc_type = r["type"] or "unknown"
+        chunks = r["chunk_count"] or 0
+        size = r["size_bytes"] or 0
+        date = (r["indexed_at"] or "")[:10]
+
+        if size >= 1_000_000:
+            size_str = f"{size / 1_000_000:.1f} MB"
+        elif size >= 1_000:
+            size_str = f"{size / 1_000:.1f} KB"
+        else:
+            size_str = f"{size} B"
+
+        print(f"  {path:<50} {doc_type:<12} {chunks:>3} chunks  {size_str:>10}  {date}")
+
+
+def cmd_completion(shell: str):
+    subcommands = "init add remove sources index allow search ask stats reset list completion"
+
+    if shell == "zsh":
+        print(f"""\
+#compdef kb
+_kb() {{
+  local -a commands
+  commands=({subcommands})
+  _arguments '1:command:({" ".join(subcommands.split())})' '*:file:_files'
+}}
+_kb "$@\"""")
+    elif shell == "bash":
+        print(f"""\
+_kb() {{
+  local cur commands
+  COMPREPLY=()
+  cur="${{COMP_WORDS[COMP_CWORD]}}"
+  if [[ $COMP_CWORD -eq 1 ]]; then
+    commands="{subcommands}"
+    COMPREPLY=( $(compgen -W "$commands" -- "$cur") )
+  else
+    case "${{COMP_WORDS[1]}}" in
+      add|remove|index|allow)
+        COMPREPLY=( $(compgen -d -- "$cur") )
+        ;;
+      init)
+        COMPREPLY=( $(compgen -W "--project" -- "$cur") )
+        ;;
+      completion)
+        COMPREPLY=( $(compgen -W "zsh bash fish" -- "$cur") )
+        ;;
+    esac
+  fi
+}}
+complete -F _kb kb""")
+    elif shell == "fish":
+        cmds = subcommands.split()
+        print("# Fish completions for kb")
+        for c in cmds:
+            print(f"complete -c kb -n '__fish_use_subcommand' -a {c}")
+        print("complete -c kb -n '__fish_seen_subcommand_from add remove index allow' -F")
+        print("complete -c kb -n '__fish_seen_subcommand_from init' -a '--project'")
+        print("complete -c kb -n '__fish_seen_subcommand_from completion' -a 'zsh bash fish'")
+    else:
+        print(f"Unsupported shell: {shell}")
+        print("Supported: zsh, bash, fish")
+        sys.exit(1)
 
 
 def main():
@@ -454,6 +601,13 @@ def main():
         cmd_init(project)
         sys.exit(0)
 
+    if cmd == "completion":
+        if len(args) < 2:
+            print("Usage: kb completion <zsh|bash|fish>")
+            sys.exit(1)
+        cmd_completion(args[1])
+        sys.exit(0)
+
     # All other commands need config
     cfg = find_config()
 
@@ -466,6 +620,8 @@ def main():
             print("No config found. Run 'kb init' first.")
             sys.exit(1)
         cmd_add(cfg, args[1:])
+    elif cmd == "allow":
+        cmd_allow(cfg, args[1:])
     elif cmd == "remove":
         if not cfg.config_path:
             print("No config found. Run 'kb init' first.")
@@ -487,6 +643,8 @@ def main():
             sys.exit(1)
         top_k = int(args[2]) if len(args) > 2 else 8
         cmd_ask(args[1], cfg, top_k)
+    elif cmd == "list":
+        cmd_list(cfg)
     elif cmd == "stats":
         cmd_stats(cfg)
     elif cmd == "reset":

@@ -53,13 +53,15 @@ api-reference/
 _generated/
 ```
 
-### Large files that chunk poorly
+### Large / generated files
 
 ```
 *.min.js
 *.bundle.js
 package-lock.json
 yarn.lock
+*.min.css
+*.map
 ```
 
 ### Private / sensitive

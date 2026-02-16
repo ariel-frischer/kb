@@ -43,6 +43,13 @@ sources = [
 # rrf_k = 60.0            # RRF smoothing constant
 # rerank_fetch_k = 20     # candidates to fetch for LLM rerank
 # rerank_top_k = 5        # how many to keep after rerank
+
+# Format options
+# index_code = false                # also index source code files (.py, .js, .ts, etc.)
+
+# Size guard
+# max_file_size_mb = 10             # skip files larger than this during indexing
+# allowed_large_files = []          # paths that bypass the size limit
 """
 
 GLOBAL_CONFIG_TEMPLATE = """\
@@ -61,6 +68,13 @@ sources = [
 
 # LLM
 # chat_model = "gpt-4o-mini"
+
+# Format options
+# index_code = false                # also index source code files (.py, .js, .ts, etc.)
+
+# Size guard
+# max_file_size_mb = 10             # skip files larger than this during indexing
+# allowed_large_files = []          # paths that bypass the size limit
 """
 
 # Keep old name as alias for backward compat in imports
@@ -81,6 +95,9 @@ class Config:
     rrf_k: float = 60.0
     rerank_fetch_k: int = 20
     rerank_top_k: int = 5
+    max_file_size_mb: float = 10
+    allowed_large_files: list[str] = field(default_factory=list)
+    index_code: bool = False
 
     scope: str = "project"  # "global" or "project"
 

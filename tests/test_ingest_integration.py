@@ -118,7 +118,7 @@ class TestIndexDirectory:
             index_directory(docs, cfg)
 
         out = capsys.readouterr().out
-        assert "Found 0 markdown" in out
+        assert "Found 0 files" in out
 
 
 class TestOrphanChunkCleanup:
@@ -153,13 +153,13 @@ class TestPdfExtraction:
     def test_extract_pdf_text(self):
         """Only runs if pymupdf is available."""
         try:
-            from kb.ingest import extract_pdf_text, PYMUPDF_AVAILABLE
+            from kb.extract import _extract_pdf, _PYMUPDF
         except ImportError:
             pytest.skip("pymupdf not installed")
 
-        if not PYMUPDF_AVAILABLE:
+        if not _PYMUPDF:
             pytest.skip("pymupdf not installed")
 
         # We can't easily create a real PDF in a unit test without a dependency,
         # so just verify the function exists and is callable
-        assert callable(extract_pdf_text)
+        assert callable(_extract_pdf)

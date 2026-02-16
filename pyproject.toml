@@ -1,6 +1,6 @@
 [project]
 name = "kb"
-version = "1.0.2"
+version = "1.0.3"
 description = "CLI knowledge base: index markdown + PDFs, hybrid search, RAG answers. Powered by sqlite-vec."
 readme = "README.md"
 license = "MIT"

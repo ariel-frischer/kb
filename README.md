@@ -1,23 +1,28 @@
-# kb
+# kb (knowledge base)
 
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 CLI knowledge base: index markdown + PDFs, hybrid search (semantic + keyword), RAG answers. Powered by [sqlite-vec](https://github.com/asg017/sqlite-vec).
 
+## Features
+
+- **Hybrid search** — vector similarity + FTS5 keyword search, fused with Reciprocal Rank Fusion
+- **Heading-aware chunking** — markdown split by heading hierarchy, each chunk carries ancestry
+- **Incremental indexing** — content-hash per chunk, only re-embeds changes
+- **LLM rerank** — `ask` over-fetches candidates, LLM ranks by relevance, keeps the best
+- **Pre-search filters** — file globs, date ranges, keyword inclusion/exclusion
+- **PDF support** — install with `kb[pdf]` or `kb[all]`
+- **Pluggable chunking** — uses [chonkie](https://github.com/bhavnicksm/chonkie) when available, regex fallback otherwise
+
 ## Install
 
 ```bash
-# From PyPI (with all features)
-pip install "kb[all]"
+# One-liner (installs uv if needed)
+curl -LsSf https://gitlab.com/ariel-frischer/kb/-/raw/main/install.sh | sh
 
-# Or with uv
-uv tool install "kb[all]"
-
-# From source
-git clone https://github.com/arielfrischer/kb.git
-cd kb
-uv tool install ".[all]"
+# Or with uv directly
+uv tool install --from "git+https://gitlab.com/ariel-frischer/kb.git" "kb[all]"
 ```
 
 Requires an OpenAI-compatible API. Set `OPENAI_API_KEY` in your environment (or in `~/.config/kb/secrets.toml`).
@@ -136,16 +141,6 @@ kb ask 'file:briefs/*.pdf dt>"2026-02-13" what are the costs?'
 | Must contain | `+"keyword"` | `+"docker"` |
 | Must not contain | `-"keyword"` | `-"kubernetes"` |
 
-## Features
-
-- **Hybrid search** — vector similarity + FTS5 keyword search, fused with Reciprocal Rank Fusion
-- **Heading-aware chunking** — markdown split by heading hierarchy, each chunk carries ancestry
-- **Incremental indexing** — content-hash per chunk, only re-embeds changes
-- **LLM rerank** — `ask` over-fetches candidates, LLM ranks by relevance, keeps the best
-- **Pre-search filters** — file globs, date ranges, keyword inclusion/exclusion
-- **PDF support** — install with `kb[pdf]` or `kb[all]`
-- **Pluggable chunking** — uses [chonkie](https://github.com/bhavnicksm/chonkie) when available, regex fallback otherwise
-
 ## How It Works
 
 ```
@@ -173,11 +168,34 @@ kb ask "question"
   5. LLM generates answer from context
 ```
 
+## Alternatives
+
+| Tool | What it is | Local-only | CLI | Setup |
+|------|-----------|:----------:|:---:|-------|
+| **kb** | Hybrid search + RAG over your markdown/PDFs | Yes | Yes | `uv tool install`, single SQLite file |
+| [Khoj](https://github.com/khoj-ai/khoj) | Self-hosted AI second brain with web UI, mobile, Obsidian/Emacs plugins | Optional | No | Docker or pip, runs a web server |
+| [Reor](https://github.com/reorproject/reor) | Desktop note-taking app with auto-linking and local LLM | Yes | No | Electron app, uses LanceDB + Ollama |
+| [LlamaIndex](https://github.com/run-llama/llama_index) | Framework for building RAG pipelines | Depends | No | Python library, you build the app |
+| [ChromaDB](https://github.com/chroma-core/chroma) | Vector database with simple API | Yes | No | Python library, you build the app |
+| [grepai](https://github.com/yoanbernabeu/grepai) | Semantic code search + call graphs, 100% local | Yes | Yes | `brew install` or curl, uses Ollama/OpenAI embeddings |
+
+**When to use what:**
+
+- **kb** — you want a CLI tool that indexes docs (markdown, PDFs) and answers questions with RAG
+- **grepai** — you want semantic search over code (find by intent, trace call graphs), no RAG/LLM answers
+- **Khoj** — you want a full-featured app with web UI, phone access, Obsidian integration, and agent capabilities
+- **Reor** — you want an Obsidian-like desktop editor that auto-links notes using local AI
+- **LlamaIndex / ChromaDB** — you're building your own RAG app and need libraries, not a finished tool
+
 ## Contributing
 
 Contributions welcome! Please open an issue first to discuss what you'd like to change.
 
 See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for setup, architecture, and workflow.
+
+## Maintenance
+
+This is a personal tool I've open-sourced. I may or may not respond to issues/PRs. Fork freely.
 
 ## License
 

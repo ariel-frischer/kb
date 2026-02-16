@@ -48,7 +48,7 @@ Usage:
   kb tag <file> tag1 [tag2...]   Add tags to a document
   kb untag <file> tag1 [tag2...]  Remove tags from a document
   kb tags                        List all tags with document counts
-  kb list                        List indexed documents
+  kb list [--full]                List indexed documents (summary; --full for details)
   kb stats                       Show index statistics and supported formats
   kb reset                       Drop database and start fresh
   kb completion <shell>           Output shell completions (zsh, bash, fish)

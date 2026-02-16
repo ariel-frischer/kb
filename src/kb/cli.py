@@ -42,7 +42,7 @@ Usage:
   kb sources                     List configured sources
   kb index [DIR...] [--no-size-limit]  Index sources (skip files > max_file_size_mb)
   kb allow <file>                Whitelist a large file for indexing
-  kb search "query" [k]          Hybrid semantic + keyword search (default k=5)
+  kb search "query" [k] [--threshold N]  Hybrid semantic + keyword search (default k=5, threshold=0.001)
   kb ask "question" [k] [--threshold N]  RAG: search + rerank + answer (default k=8, threshold=0.001)
   kb similar <file> [k]          Find similar documents (no API call, default k=10)
   kb tag <file> tag1 [tag2...]   Add tags to a document
@@ -219,7 +219,7 @@ def cmd_index(cfg: Config, args: list[str]):
 
 def cmd_search(query: str, cfg: Config, top_k: int = 5, threshold: float | None = None):
     if threshold is not None:
-        cfg.threshold = threshold
+        cfg.search_threshold = threshold
     if not cfg.db_path.exists():
         print("No index found. Run 'kb index' first.")
         sys.exit(1)
@@ -240,7 +240,7 @@ def cmd_search(query: str, cfg: Config, top_k: int = 5, threshold: float | None 
     query_emb = resp.data[0].embedding
     embed_ms = (time.time() - t0) * 1000
 
-    has_threshold = cfg.threshold > 0
+    has_threshold = cfg.search_threshold > 0
     retrieve_k = (top_k * 5) if has_filters else (top_k * 3)
 
     t0 = time.time()
@@ -282,7 +282,7 @@ def cmd_search(query: str, cfg: Config, top_k: int = 5, threshold: float | None 
         results = [
             r
             for r in results
-            if r["similarity"] is None or r["similarity"] >= cfg.threshold
+            if r["similarity"] is None or r["similarity"] >= cfg.search_threshold
         ]
 
     print(f'Query: "{clean_query}"')
@@ -319,7 +319,7 @@ def cmd_search(query: str, cfg: Config, top_k: int = 5, threshold: float | None 
 def cmd_ask(question: str, cfg: Config, top_k: int = 8, threshold: float | None = None):
     """Full RAG: hybrid retrieve -> filter -> LLM rerank -> confidence filter -> answer."""
     if threshold is not None:
-        cfg.threshold = threshold
+        cfg.ask_threshold = threshold
     if not cfg.db_path.exists():
         print("No index found. Run 'kb index' first.")
         sys.exit(1)
@@ -380,7 +380,7 @@ def cmd_ask(question: str, cfg: Config, top_k: int = 8, threshold: float | None 
     filtered = [
         r
         for r in results
-        if r["similarity"] is None or r["similarity"] >= cfg.threshold
+        if r["similarity"] is None or r["similarity"] >= cfg.ask_threshold
     ]
 
     if not filtered:

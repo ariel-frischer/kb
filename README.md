@@ -75,7 +75,7 @@ kb remove <dir> [dir...]       Remove source directories
 kb sources                     List configured sources
 kb index [DIR...]              Index sources from config (or explicit dirs)
 kb search "query" [k]          Hybrid search (default k=5)
-kb ask "question" [k]          RAG answer (search + rerank + generate, default k=8)
+kb ask "question" [k] [--threshold N]  RAG answer (search + rerank + generate, default k=8)
 kb list                        Summary of indexed documents by type
 kb list --full                 List every indexed document with metadata
 kb similar <file> [k]          Find similar documents (no API call, default k=10)
@@ -124,7 +124,7 @@ sources = [
 # embed_dims = 1536
 # chat_model = "gpt-4o-mini"
 # max_chunk_chars = 2000
-# min_similarity = 0.25
+# min_similarity = 0.25        # cosine similarity floor for ask (also --threshold flag)
 # rerank_fetch_k = 20
 # rerank_top_k = 5
 # index_code = false       # set true to also index source code files

@@ -43,7 +43,7 @@ Usage:
   kb index [DIR...] [--no-size-limit]  Index sources (skip files > max_file_size_mb)
   kb allow <file>                Whitelist a large file for indexing
   kb search "query" [k]          Hybrid semantic + keyword search (default k=5)
-  kb ask "question" [k]          RAG: search + LLM rerank + answer (default k=8)
+  kb ask "question" [k] [--threshold N]  RAG: search + rerank + answer (default k=8, threshold=0.25)
   kb similar <file> [k]          Find similar documents (no API call, default k=10)
   kb tag <file> tag1 [tag2...]   Add tags to a document
   kb untag <file> tag1 [tag2...]  Remove tags from a document
@@ -304,8 +304,10 @@ def cmd_search(query: str, cfg: Config, top_k: int = 5):
     conn.close()
 
 
-def cmd_ask(question: str, cfg: Config, top_k: int = 8):
+def cmd_ask(question: str, cfg: Config, top_k: int = 8, threshold: float | None = None):
     """Full RAG: hybrid retrieve -> filter -> LLM rerank -> confidence filter -> answer."""
+    if threshold is not None:
+        cfg.min_similarity = threshold
     if not cfg.db_path.exists():
         print("No index found. Run 'kb index' first.")
         sys.exit(1)
@@ -806,6 +808,9 @@ _kb() {{
       init)
         COMPREPLY=( $(compgen -W "--project" -- "$cur") )
         ;;
+      ask)
+        COMPREPLY=( $(compgen -W "--threshold" -- "$cur") )
+        ;;
       completion)
         COMPREPLY=( $(compgen -W "zsh bash fish" -- "$cur") )
         ;;
@@ -822,6 +827,7 @@ complete -F _kb kb""")
             "complete -c kb -n '__fish_seen_subcommand_from add remove index allow' -F"
         )
         print("complete -c kb -n '__fish_seen_subcommand_from init' -a '--project'")
+        print("complete -c kb -n '__fish_seen_subcommand_from ask' -a '--threshold'")
         print(
             "complete -c kb -n '__fish_seen_subcommand_from completion' -a 'zsh bash fish'"
         )
@@ -909,10 +915,21 @@ def main():
         cmd_search(args[1], cfg, top_k)
     elif cmd == "ask":
         if len(args) < 2 or sub_help:
-            print('Usage: kb ask "question" [k]')
+            print('Usage: kb ask "question" [k] [--threshold N]')
             sys.exit(0 if sub_help else 1)
-        top_k = int(args[2]) if len(args) > 2 else 8
-        cmd_ask(args[1], cfg, top_k)
+        threshold = None
+        ask_args = list(args[1:])
+        if "--threshold" in ask_args:
+            ti = ask_args.index("--threshold")
+            if ti + 1 < len(ask_args):
+                threshold = float(ask_args[ti + 1])
+                del ask_args[ti : ti + 2]
+            else:
+                print("--threshold requires a value")
+                sys.exit(1)
+        question = ask_args[0]
+        top_k = int(ask_args[1]) if len(ask_args) > 1 else 8
+        cmd_ask(question, cfg, top_k, threshold=threshold)
     elif cmd == "similar":
         if len(args) < 2 or sub_help:
             print("Usage: kb similar <file> [k]")

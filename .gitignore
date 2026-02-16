@@ -13,6 +13,7 @@ dist/
 .DS_Store
 .uv/
 .learnings/
+.claude/
 secrets.yaml
 secrets.toml
 *.db

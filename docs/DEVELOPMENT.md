@@ -57,6 +57,10 @@ src/kb/
 - **Content-hash per chunk** — incremental indexing only re-embeds changed content
 - **Config walks up from cwd** — like `.gitignore`, so `kb` works from any subdirectory
 
+## Reference docs
+
+- [.kbignore patterns](kbignore.md) — common ignore patterns by use case
+
 ## Adding a new command
 
 1. Add the function in `cli.py` following the existing pattern (parse args → load config → connect → execute)

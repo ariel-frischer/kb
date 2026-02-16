@@ -3,7 +3,7 @@
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-CLI knowledge base: index markdown + PDFs, hybrid search (semantic + keyword), RAG answers. Powered by [sqlite-vec](https://github.com/asg017/sqlite-vec).
+CLI RAG tool for your docs. Index markdown + PDFs, hybrid search (semantic + keyword), ask questions and get sourced answers. Built on [sqlite-vec](https://github.com/asg017/sqlite-vec).
 
 ## Features
 
@@ -44,7 +44,7 @@ kb index
 # 4. Search
 kb search "deployment patterns"
 
-# 5. Ask (RAG: search + LLM rerank + answer)
+# 5. Ask (RAG: search → rerank → answer)
 kb ask "what are the recommended deployment patterns?"
 
 # 6. Check what's indexed
@@ -61,7 +61,7 @@ kb remove <dir> [dir...]  Remove source directories
 kb sources                List configured sources
 kb index [DIR...]         Index sources from config (or explicit dirs)
 kb search "query" [k]     Hybrid search (default k=5)
-kb ask "question" [k]     RAG answer (default k=8)
+kb ask "question" [k]     RAG answer (search + rerank + generate, default k=8)
 kb stats                  Show index stats + capabilities
 kb reset                  Drop DB and start fresh
 ```
@@ -97,17 +97,23 @@ sources = [
 
 ### .kbignore
 
-Drop a `.kbignore` in any source directory. Gitignore-style syntax:
+Drop a `.kbignore` in any source directory to exclude files from indexing. Uses fnmatch glob syntax with `#` comments.
+
+Lookup order: checks `<source-dir>/.kbignore`, then `<source-dir>/../.kbignore` (first found wins).
 
 ```
-# Skip directories
-internal/
+# Skip directories (trailing slash)
 drafts/
+.obsidian/
+node_modules/
 
 # Skip file patterns
 *.draft.md
 WIP-*
+CHANGELOG.md
 ```
+
+See [docs/kbignore.md](docs/kbignore.md) for common patterns by use case.
 
 ### secrets.toml
 
@@ -172,7 +178,7 @@ kb ask "question"
 
 | Tool | What it is | Local-only | CLI | Setup |
 |------|-----------|:----------:|:---:|-------|
-| **kb** | Hybrid search + RAG over your markdown/PDFs | Yes | Yes | `uv tool install`, single SQLite file |
+| **kb** | CLI RAG tool — hybrid search + Q&A over your markdown/PDFs | Yes | Yes | `uv tool install`, single SQLite file |
 | [Khoj](https://github.com/khoj-ai/khoj) | Self-hosted AI second brain with web UI, mobile, Obsidian/Emacs plugins | Optional | No | Docker or pip, runs a web server |
 | [Reor](https://github.com/reorproject/reor) | Desktop note-taking app with auto-linking and local LLM | Yes | No | Electron app, uses LanceDB + Ollama |
 | [LlamaIndex](https://github.com/run-llama/llama_index) | Framework for building RAG pipelines | Depends | No | Python library, you build the app |
@@ -181,11 +187,11 @@ kb ask "question"
 
 **When to use what:**
 
-- **kb** — you want a CLI tool that indexes docs (markdown, PDFs) and answers questions with RAG
-- **grepai** — you want semantic search over code (find by intent, trace call graphs), no RAG/LLM answers
+- **kb** — you want a CLI RAG tool that indexes docs (markdown, PDFs) and answers questions from them
+- **grepai** — you want semantic search over code (find by intent, trace call graphs), no RAG
 - **Khoj** — you want a full-featured app with web UI, phone access, Obsidian integration, and agent capabilities
 - **Reor** — you want an Obsidian-like desktop editor that auto-links notes using local AI
-- **LlamaIndex / ChromaDB** — you're building your own RAG app and need libraries, not a finished tool
+- **LlamaIndex / ChromaDB** — you're building your own RAG pipeline and need libraries, not a finished tool
 
 ## Contributing
 

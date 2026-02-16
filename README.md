@@ -20,17 +20,18 @@ cd kb
 uv tool install ".[all]"
 ```
 
-Requires `OPENAI_API_KEY` in your environment (or in `~/.config/kb/secrets.yaml`).
+Requires an OpenAI-compatible API. Set `OPENAI_API_KEY` in your environment (or in `~/.config/kb/secrets.yaml`).
+
+Works with any provider that speaks the OpenAI API — set `OPENAI_BASE_URL` to point at Ollama, LiteLLM, vLLM, etc.
 
 ## Quickstart
 
 ```bash
-# 1. Create config in your project
-cd ~/my-project
+# 1. Initialize (global — indexes across repos/folders)
 kb init
 
-# 2. Edit .kb.toml — add your source directories
-#    sources = ["docs/", "notes/"]
+# 2. Add source directories
+kb add ~/notes ~/docs ~/repos/my-project/docs
 
 # 3. Index
 kb index
@@ -48,7 +49,11 @@ kb stats
 ## Commands
 
 ```
-kb init                   Create .kb.toml in current directory
+kb init                   Create global config (~/.config/kb/)
+kb init --project         Create project-local .kb.toml in current directory
+kb add <dir> [dir...]     Add source directories
+kb remove <dir> [dir...]  Remove source directories
+kb sources                List configured sources
 kb index [DIR...]         Index sources from config (or explicit dirs)
 kb search "query" [k]     Hybrid search (default k=5)
 kb ask "question" [k]     RAG answer (default k=8)
@@ -58,18 +63,21 @@ kb reset                  Drop DB and start fresh
 
 ## Configuration
 
-### .kb.toml
+### Global mode (default)
 
-Created by `kb init`. Config is found by walking up from cwd (like `.gitignore`).
+`kb init` creates `~/.config/kb/config.toml`. Database lives at `~/.local/share/kb/kb.db`. Sources are absolute paths, managed with `kb add` / `kb remove`.
+
+### Project mode
+
+`kb init --project` creates `.kb.toml` in the current directory (found by walking up from cwd, like `.gitignore`). Database and sources are relative to the config file. Project config takes precedence over global when both exist.
+
+### Config format
 
 ```toml
-# Where to store the database (relative to this file)
-db = "kb.db"
-
-# Directories to index (relative to this file)
+# Sources (absolute paths in global mode, relative in project mode)
 sources = [
-    "docs/",
-    "notes/",
+    "/home/user/notes",
+    "/home/user/docs",
 ]
 
 # All optional — defaults shown
@@ -98,10 +106,13 @@ WIP-*
 
 ### secrets.yaml
 
-Optionally store API keys in `~/.config/kb/secrets.yaml` instead of environment variables:
+Optionally store config in `~/.config/kb/secrets.yaml` instead of environment variables:
 
 ```yaml
 openai_api_key: sk-...
+# For Ollama / other providers:
+# openai_base_url: http://localhost:11434/v1
+# openai_api_key: unused
 ```
 
 Keys are loaded as uppercase environment variables. Existing env vars take precedence.

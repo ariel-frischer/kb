@@ -201,15 +201,8 @@ def index_directory(dir_path: Path, cfg: Config):
     chunks_reused = 0
     to_embed: list[tuple[str, int, str, str, str]] = []
 
-    # Determine base path for relative paths
-    # Use config_dir if available, otherwise dir_path's grandparent (legacy compat)
-    base_path = cfg.config_dir if cfg.config_dir else dir_path.parent.parent
-
     for md_file in md_files:
-        try:
-            rel_path = str(md_file.relative_to(base_path))
-        except ValueError:
-            rel_path = str(md_file)
+        rel_path = cfg.doc_path_for_db(md_file, dir_path)
         text = md_file.read_text(errors="replace")
         if len(text.strip()) < cfg.min_chunk_chars:
             continue
@@ -224,10 +217,7 @@ def index_directory(dir_path: Path, cfg: Config):
             skipped += 1
 
     for pdf_file in pdf_files:
-        try:
-            rel_path = str(pdf_file.relative_to(base_path))
-        except ValueError:
-            rel_path = str(pdf_file)
+        rel_path = cfg.doc_path_for_db(pdf_file, dir_path)
         try:
             text = extract_pdf_text(pdf_file)
         except Exception as e:

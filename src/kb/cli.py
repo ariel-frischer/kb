@@ -8,7 +8,18 @@ from pathlib import Path
 from openai import OpenAI
 
 from .chunk import CHONKIE_AVAILABLE
-from .config import CONFIG_FILE, CONFIG_TEMPLATE, Config, find_config, load_secrets
+from .config import (
+    GLOBAL_CONFIG_DIR,
+    GLOBAL_CONFIG_FILE,
+    GLOBAL_CONFIG_TEMPLATE,
+    GLOBAL_DATA_DIR,
+    PROJECT_CONFIG_FILE,
+    PROJECT_CONFIG_TEMPLATE,
+    Config,
+    find_config,
+    load_secrets,
+    save_config,
+)
 from .db import connect, reset
 from .embed import serialize_f32
 from .filters import apply_filters, has_active_filters, parse_filters
@@ -20,7 +31,11 @@ USAGE = """\
 kb — CLI knowledge base powered by sqlite-vec
 
 Usage:
-  kb init                        Create .kb.toml config in current directory
+  kb init                        Create global config (~/.config/kb/)
+  kb init --project              Create project-local .kb.toml in current directory
+  kb add <dir> [dir...]          Add source directories
+  kb remove <dir> [dir...]       Remove source directories
+  kb sources                     List configured sources
   kb index [DIR...]              Index sources from config (or explicit dirs)
   kb search "query" [k]          Hybrid semantic + keyword search (default k=5)
   kb ask "question" [k]          RAG: search + LLM rerank + answer (default k=8)
@@ -35,23 +50,100 @@ Search filters (inline with query):
   -"keyword"                     Must not contain
 
 Examples:
-  kb init
-  kb index
-  kb index ~/notes ~/docs
+  kb init                        # global mode (default)
+  kb add ~/notes ~/docs          # add sources
+  kb index                       # index all sources
   kb search 'file:articles/*.md cost optimization'
   kb ask 'dt>"2026-02-01" what deployment patterns?'
-  kb search '+"docker" -"kubernetes" containers'
+  kb init --project              # project-local mode
 """
 
 
-def cmd_init():
-    cfg_path = Path.cwd() / CONFIG_FILE
-    if cfg_path.exists():
-        print(f"{CONFIG_FILE} already exists at {cfg_path}")
+def cmd_init(project: bool):
+    if project:
+        cfg_path = Path.cwd() / PROJECT_CONFIG_FILE
+        if cfg_path.exists():
+            print(f"{PROJECT_CONFIG_FILE} already exists at {cfg_path}")
+            sys.exit(1)
+        cfg_path.write_text(PROJECT_CONFIG_TEMPLATE)
+        print(f"Created {cfg_path}")
+        print("Edit 'sources' to add directories to index, then run: kb index")
+    else:
+        if GLOBAL_CONFIG_FILE.exists():
+            print(f"Global config already exists at {GLOBAL_CONFIG_FILE}")
+            sys.exit(1)
+        GLOBAL_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+        GLOBAL_DATA_DIR.mkdir(parents=True, exist_ok=True)
+        GLOBAL_CONFIG_FILE.write_text(GLOBAL_CONFIG_TEMPLATE)
+        print(f"Created {GLOBAL_CONFIG_FILE}")
+        print(f"Database: {GLOBAL_DATA_DIR / 'kb.db'}")
+        print("Add sources with: kb add ~/notes ~/docs")
+
+
+def cmd_add(cfg: Config, dirs: list[str]):
+    if not dirs:
+        print("Usage: kb add <dir> [dir...]")
         sys.exit(1)
-    cfg_path.write_text(CONFIG_TEMPLATE)
-    print(f"Created {cfg_path}")
-    print("Edit 'sources' to add directories to index, then run: kb index")
+
+    for d in dirs:
+        p = Path(d).expanduser().resolve()
+        if not p.is_dir():
+            print(f"Not a directory: {d}")
+            sys.exit(1)
+
+        if cfg.scope == "global":
+            entry = str(p)
+        else:
+            try:
+                entry = str(p.relative_to(cfg.config_dir))
+            except ValueError:
+                entry = str(p)
+
+        if entry in cfg.sources:
+            print(f"  Already added: {entry}")
+            continue
+
+        cfg.sources.append(entry)
+        print(f"  Added: {entry}")
+
+    save_config(cfg)
+    print(f"Saved {cfg.config_path}")
+
+
+def cmd_remove(cfg: Config, dirs: list[str]):
+    if not dirs:
+        print("Usage: kb remove <dir> [dir...]")
+        sys.exit(1)
+
+    for d in dirs:
+        p = Path(d).expanduser().resolve()
+        if cfg.scope == "global":
+            entry = str(p)
+        else:
+            try:
+                entry = str(p.relative_to(cfg.config_dir))
+            except ValueError:
+                entry = str(p)
+
+        if entry in cfg.sources:
+            cfg.sources.remove(entry)
+            print(f"  Removed: {entry}")
+        else:
+            print(f"  Not found: {entry}")
+
+    save_config(cfg)
+    print(f"Saved {cfg.config_path}")
+
+
+def cmd_sources(cfg: Config):
+    if not cfg.sources:
+        print("No sources configured. Run: kb add <dir>")
+        return
+    for s in cfg.sources:
+        p = Path(s).expanduser() if cfg.scope == "global" else cfg.config_dir / s
+        exists = p.is_dir()
+        marker = " " if exists else " (missing)"
+        print(f"  {s}{marker}")
 
 
 def cmd_index(cfg: Config, args: list[str]):
@@ -61,7 +153,7 @@ def cmd_index(cfg: Config, args: list[str]):
         dirs = cfg.source_paths
     else:
         print("No sources configured. Either:")
-        print(f"  1. Run 'kb init' and add directories to {CONFIG_FILE}")
+        print("  1. Run 'kb add <dir>' to add source directories")
         print("  2. Pass directories explicitly: kb index ~/docs ~/notes")
         sys.exit(1)
 
@@ -358,15 +450,30 @@ def main():
         sys.exit(0)
 
     if cmd == "init":
-        cmd_init()
+        project = "--project" in args[1:]
+        cmd_init(project)
         sys.exit(0)
 
     # All other commands need config
     cfg = find_config()
-    if cfg.config_dir:
-        print(f"Config: {cfg.config_dir / CONFIG_FILE}")
 
-    if cmd == "index":
+    scope_label = f"[{cfg.scope}]" if cfg.config_path else "[no config]"
+    if cfg.config_path:
+        print(f"Config: {cfg.config_path} {scope_label}")
+
+    if cmd == "add":
+        if not cfg.config_path:
+            print("No config found. Run 'kb init' first.")
+            sys.exit(1)
+        cmd_add(cfg, args[1:])
+    elif cmd == "remove":
+        if not cfg.config_path:
+            print("No config found. Run 'kb init' first.")
+            sys.exit(1)
+        cmd_remove(cfg, args[1:])
+    elif cmd == "sources":
+        cmd_sources(cfg)
+    elif cmd == "index":
         cmd_index(cfg, args[1:])
     elif cmd == "search":
         if len(args) < 2:

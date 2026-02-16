@@ -782,13 +782,12 @@ def cmd_completion(shell: str):
 
     if shell == "zsh":
         print(f"""\
-#compdef kb
 _kb() {{
   local -a commands
   commands=({subcommands})
   _arguments '1:command:({" ".join(subcommands.split())})' '*:file:_files'
 }}
-_kb "$@\"""")
+compdef _kb kb""")
     elif shell == "bash":
         print(f"""\
 _kb() {{

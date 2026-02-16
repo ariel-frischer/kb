@@ -76,7 +76,8 @@ kb sources                     List configured sources
 kb index [DIR...]              Index sources from config (or explicit dirs)
 kb search "query" [k]          Hybrid search (default k=5)
 kb ask "question" [k]          RAG answer (search + rerank + generate, default k=8)
-kb list                        List indexed documents with metadata
+kb list                        Summary of indexed documents by type
+kb list --full                 List every indexed document with metadata
 kb similar <file> [k]          Find similar documents (no API call, default k=10)
 kb tag <file> tag1 [tag2...]   Add tags to a document
 kb untag <file> tag1 [tag2...]  Remove tags from a document

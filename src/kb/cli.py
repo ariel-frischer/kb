@@ -432,6 +432,7 @@ def cmd_ask(question: str, cfg: Config, top_k: int = 8):
     print(
         f"(embed: {embed_ms:.0f}ms | search: {vec_ms + fts_ms:.1f}ms | generate: {gen_ms:.0f}ms)"
     )
+    print(f"(model: {cfg.chat_model})")
     print(f"(tokens: {tokens.prompt_tokens} in / {tokens.completion_tokens} out)")
     print(f"(results: {len(results)} retrieved, {len(filtered)} above threshold)\n")
     print(answer)
@@ -845,14 +846,17 @@ def main():
         sys.exit(0)
 
     if cmd == "init":
+        if len(args) > 1 and args[1] in ("-h", "--help"):
+            print("Usage: kb init [--project]")
+            sys.exit(0)
         project = "--project" in args[1:]
         cmd_init(project)
         sys.exit(0)
 
     if cmd == "completion":
-        if len(args) < 2:
+        if len(args) < 2 or args[1] in ("-h", "--help"):
             print("Usage: kb completion <zsh|bash|fish>")
-            sys.exit(1)
+            sys.exit(0 if len(args) > 1 and args[1] in ("-h", "--help") else 1)
         cmd_completion(args[1])
         sys.exit(0)
 
@@ -863,57 +867,87 @@ def main():
     if cfg.config_path:
         print(f"Config: {cfg.config_path} {scope_label}")
 
+    # Per-subcommand help
+    sub_help = len(args) > 1 and args[1] in ("-h", "--help")
+
     if cmd == "add":
         if not cfg.config_path:
             print("No config found. Run 'kb init' first.")
             sys.exit(1)
+        if sub_help or not args[1:]:
+            print("Usage: kb add <dir> [dir...]")
+            sys.exit(0)
         cmd_add(cfg, args[1:])
     elif cmd == "allow":
+        if sub_help or not args[1:]:
+            print("Usage: kb allow <file>")
+            sys.exit(0)
         cmd_allow(cfg, args[1:])
     elif cmd == "remove":
         if not cfg.config_path:
             print("No config found. Run 'kb init' first.")
             sys.exit(1)
+        if sub_help or not args[1:]:
+            print("Usage: kb remove <dir> [dir...]")
+            sys.exit(0)
         cmd_remove(cfg, args[1:])
     elif cmd == "sources":
+        if sub_help:
+            print("Usage: kb sources")
+            sys.exit(0)
         cmd_sources(cfg)
     elif cmd == "index":
+        if sub_help:
+            print("Usage: kb index [DIR...] [--no-size-limit]")
+            sys.exit(0)
         cmd_index(cfg, args[1:])
     elif cmd == "search":
-        if len(args) < 2:
-            print('Usage: kb search "query"')
-            sys.exit(1)
+        if len(args) < 2 or sub_help:
+            print('Usage: kb search "query" [k]')
+            sys.exit(0 if sub_help else 1)
         top_k = int(args[2]) if len(args) > 2 else 5
         cmd_search(args[1], cfg, top_k)
     elif cmd == "ask":
-        if len(args) < 2:
-            print('Usage: kb ask "question"')
-            sys.exit(1)
+        if len(args) < 2 or sub_help:
+            print('Usage: kb ask "question" [k]')
+            sys.exit(0 if sub_help else 1)
         top_k = int(args[2]) if len(args) > 2 else 8
         cmd_ask(args[1], cfg, top_k)
     elif cmd == "similar":
-        if len(args) < 2:
+        if len(args) < 2 or sub_help:
             print("Usage: kb similar <file> [k]")
-            sys.exit(1)
+            sys.exit(0 if sub_help else 1)
         top_k = int(args[2]) if len(args) > 2 else 10
         cmd_similar(args[1], cfg, top_k)
     elif cmd == "tag":
-        if len(args) < 3:
+        if len(args) < 3 or sub_help:
             print("Usage: kb tag <file> tag1 [tag2...]")
-            sys.exit(1)
+            sys.exit(0 if sub_help else 1)
         cmd_tag(cfg, args[1], args[2:])
     elif cmd == "untag":
-        if len(args) < 3:
+        if len(args) < 3 or sub_help:
             print("Usage: kb untag <file> tag1 [tag2...]")
-            sys.exit(1)
+            sys.exit(0 if sub_help else 1)
         cmd_untag(cfg, args[1], args[2:])
     elif cmd == "tags":
+        if sub_help:
+            print("Usage: kb tags")
+            sys.exit(0)
         cmd_tags(cfg)
     elif cmd == "list":
+        if sub_help:
+            print("Usage: kb list [--full]")
+            sys.exit(0)
         cmd_list(cfg, full="--full" in args)
     elif cmd == "stats":
+        if sub_help:
+            print("Usage: kb stats")
+            sys.exit(0)
         cmd_stats(cfg)
     elif cmd == "reset":
+        if sub_help:
+            print("Usage: kb reset")
+            sys.exit(0)
         reset(cfg.db_path)
     else:
         print(f"Unknown command: {cmd}")

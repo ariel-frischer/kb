@@ -20,7 +20,7 @@ cd kb
 uv tool install ".[all]"
 ```
 
-Requires an OpenAI-compatible API. Set `OPENAI_API_KEY` in your environment (or in `~/.config/kb/secrets.yaml`).
+Requires an OpenAI-compatible API. Set `OPENAI_API_KEY` in your environment (or in `~/.config/kb/secrets.toml`).
 
 Works with any provider that speaks the OpenAI API — set `OPENAI_BASE_URL` to point at Ollama, LiteLLM, vLLM, etc.
 
@@ -104,15 +104,15 @@ drafts/
 WIP-*
 ```
 
-### secrets.yaml
+### secrets.toml
 
-Optionally store config in `~/.config/kb/secrets.yaml` instead of environment variables:
+Optionally store secrets in `~/.config/kb/secrets.toml` instead of environment variables:
 
-```yaml
-openai_api_key: sk-...
+```toml
+openai_api_key = "sk-..."
 # For Ollama / other providers:
-# openai_base_url: http://localhost:11434/v1
-# openai_api_key: unused
+# openai_base_url = "http://localhost:11434/v1"
+# openai_api_key = "unused"
 ```
 
 Keys are loaded as uppercase environment variables. Existing env vars take precedence.

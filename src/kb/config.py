@@ -5,10 +5,8 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
-import yaml
-
 PROJECT_CONFIG_FILE = ".kb.toml"
-SECRETS_PATH = Path.home() / ".config" / "kb" / "secrets.yaml"
+SECRETS_PATH = Path.home() / ".config" / "kb" / "secrets.toml"
 SCHEMA_VERSION = 3
 
 GLOBAL_CONFIG_DIR = Path.home() / ".config" / "kb"
@@ -118,17 +116,14 @@ class Config:
 
 
 def load_secrets() -> None:
-    """Load API keys from ~/.config/kb/secrets.yaml into env vars.
+    """Load API keys from ~/.config/kb/secrets.toml into env vars.
 
     Existing env vars take precedence (never overwrite).
-    Creates the config dir if it doesn't exist.
     """
     if not SECRETS_PATH.is_file():
         return
-    with open(SECRETS_PATH) as f:
-        data = yaml.safe_load(f)
-    if not isinstance(data, dict):
-        return
+    with open(SECRETS_PATH, "rb") as f:
+        data = tomllib.load(f)
     for key, value in data.items():
         env_key = key.upper()
         if env_key not in os.environ:

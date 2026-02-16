@@ -32,7 +32,7 @@ uv run kb --help        # run locally
 ```
 src/kb/
 ├── cli.py       — Entry point, command dispatch (init, index, search, ask, stats, reset)
-├── config.py    — .kb.toml loading, Config dataclass, secrets.yaml loading
+├── config.py    — .kb.toml loading, Config dataclass, secrets.toml loading
 ├── db.py        — SQLite schema, sqlite-vec connection, migrations
 ├── chunk.py     — Markdown + plain text chunking (chonkie or regex fallback)
 ├── embed.py     — OpenAI embedding helpers, batching

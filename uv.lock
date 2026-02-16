@@ -354,7 +354,6 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "openai" },
-    { name = "pyyaml" },
     { name = "sqlite-vec" },
 ]
 
@@ -383,7 +382,6 @@ requires-dist = [
     { name = "openai" },
     { name = "pymupdf", marker = "extra == 'all'" },
     { name = "pymupdf", marker = "extra == 'pdf'" },
-    { name = "pyyaml" },
     { name = "sqlite-vec" },
 ]
 provides-extras = ["all", "chunking", "pdf"]

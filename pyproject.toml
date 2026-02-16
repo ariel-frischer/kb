@@ -22,7 +22,6 @@ classifiers = [
 dependencies = [
     "sqlite-vec",
     "openai",
-    "pyyaml",
 ]
 
 [project.optional-dependencies]

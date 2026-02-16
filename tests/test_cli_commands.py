@@ -225,7 +225,7 @@ class TestCmdAsk:
     def test_ask_no_results_above_threshold(self, tmp_path, capsys):
         """When all results have similarity below threshold, show 'no relevant documents'."""
         # Build a DB where vec results have high distance (low similarity)
-        cfg = Config(embed_dims=4, min_similarity=0.99)
+        cfg = Config(embed_dims=4, threshold=0.99)
         cfg.scope = "project"
         cfg.config_dir = tmp_path
         cfg.config_path = tmp_path / ".kb.toml"

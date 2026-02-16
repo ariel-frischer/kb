@@ -219,7 +219,7 @@ def cmd_index(cfg: Config, args: list[str]):
 
 def cmd_search(query: str, cfg: Config, top_k: int = 5, threshold: float | None = None):
     if threshold is not None:
-        cfg.min_similarity = threshold
+        cfg.threshold = threshold
     if not cfg.db_path.exists():
         print("No index found. Run 'kb index' first.")
         sys.exit(1)
@@ -240,7 +240,7 @@ def cmd_search(query: str, cfg: Config, top_k: int = 5, threshold: float | None 
     query_emb = resp.data[0].embedding
     embed_ms = (time.time() - t0) * 1000
 
-    has_threshold = cfg.min_similarity > 0
+    has_threshold = cfg.threshold > 0
     retrieve_k = (top_k * 5) if (has_filters or has_threshold) else (top_k * 3)
 
     t0 = time.time()
@@ -280,7 +280,7 @@ def cmd_search(query: str, cfg: Config, top_k: int = 5, threshold: float | None 
         results = [
             r
             for r in results
-            if r["similarity"] is None or r["similarity"] >= cfg.min_similarity
+            if r["similarity"] is None or r["similarity"] >= cfg.threshold
         ]
 
     results = results[:top_k]
@@ -319,7 +319,7 @@ def cmd_search(query: str, cfg: Config, top_k: int = 5, threshold: float | None 
 def cmd_ask(question: str, cfg: Config, top_k: int = 8, threshold: float | None = None):
     """Full RAG: hybrid retrieve -> filter -> LLM rerank -> confidence filter -> answer."""
     if threshold is not None:
-        cfg.min_similarity = threshold
+        cfg.threshold = threshold
     if not cfg.db_path.exists():
         print("No index found. Run 'kb index' first.")
         sys.exit(1)
@@ -380,7 +380,7 @@ def cmd_ask(question: str, cfg: Config, top_k: int = 8, threshold: float | None 
     filtered = [
         r
         for r in results
-        if r["similarity"] is None or r["similarity"] >= cfg.min_similarity
+        if r["similarity"] is None or r["similarity"] >= cfg.threshold
     ]
 
     if not filtered:

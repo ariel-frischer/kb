@@ -56,7 +56,7 @@ Path resolution: `Config.doc_path_for_db()` computes stored paths — relative t
 
 **Search**: query → parse_filters → embed → vec0 MATCH + FTS5 MATCH → RRF fusion → apply_filters → display
 
-**Ask**: same as search but over-fetches (rerank_fetch_k=20) → LLM rerank → top rerank_top_k → confidence threshold (min_similarity) → LLM generates answer
+**Ask**: same as search but over-fetches (rerank_fetch_k=20) → LLM rerank → top rerank_top_k → confidence threshold → LLM generates answer
 
 **Similar**: resolve file → read chunk embeddings from vec0 → average into doc vector → KNN query → filter out source doc → aggregate best distance per doc → display
 

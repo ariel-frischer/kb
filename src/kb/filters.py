@@ -21,9 +21,20 @@ def parse_filters(query: str) -> tuple[str, dict]:
         "date_before": None,
         "must_contain": [],
         "must_not_contain": [],
+        "type_glob": None,
+        "tags": [],
     }
 
     clean = query
+
+    m = re.search(r"type:(\S+)", clean)
+    if m:
+        filters["type_glob"] = m.group(1)
+        clean = clean[: m.start()] + clean[m.end() :]
+
+    for m in re.finditer(r"tag:(\S+)", clean):
+        filters["tags"].append(m.group(1).lower())
+    clean = re.sub(r"tag:\S+", "", clean)
 
     m = re.search(r"file:(\S+)", clean)
     if m:
@@ -64,6 +75,20 @@ def apply_filters(
         rows = conn.execute("SELECT path, indexed_at FROM documents").fetchall()
         dates_cache = {r["path"]: r["indexed_at"] for r in rows}
 
+    types_cache: dict[str, str] = {}
+    if filters.get("type_glob"):
+        rows = conn.execute("SELECT path, type FROM documents").fetchall()
+        types_cache = {r["path"]: r["type"] or "" for r in rows}
+
+    tags_cache: dict[str, set[str]] = {}
+    if filters.get("tags"):
+        rows = conn.execute("SELECT path, tags FROM documents").fetchall()
+        for r in rows:
+            raw = r["tags"] or ""
+            tags_cache[r["path"]] = {
+                t.strip().lower() for t in raw.split(",") if t.strip()
+            }
+
     filtered = []
     for r in results:
         doc_path = r.get("doc_path") or ""
@@ -71,6 +96,16 @@ def apply_filters(
 
         if filters["file_glob"] and not fnmatch(doc_path, filters["file_glob"]):
             continue
+
+        if filters.get("type_glob") and not fnmatch(
+            types_cache.get(doc_path, ""), filters["type_glob"]
+        ):
+            continue
+
+        if filters.get("tags"):
+            doc_tags = tags_cache.get(doc_path, set())
+            if not all(t in doc_tags for t in filters["tags"]):
+                continue
 
         if filters["date_after"]:
             indexed = dates_cache.get(doc_path, "")

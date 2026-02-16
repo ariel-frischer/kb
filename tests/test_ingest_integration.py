@@ -55,7 +55,9 @@ class TestIndexDirectory:
         cfg = _make_cfg(tmp_path)
         docs = tmp_path / "docs"
         docs.mkdir()
-        (docs / "a.md").write_text("# Stable\n\nThis content does not change between indexing runs.")
+        (docs / "a.md").write_text(
+            "# Stable\n\nThis content does not change between indexing runs."
+        )
 
         client = _mock_openai_client()
         client.embeddings.create.return_value.data = [
@@ -75,8 +77,12 @@ class TestIndexDirectory:
         cfg = _make_cfg(tmp_path)
         docs = tmp_path / "docs"
         docs.mkdir()
-        (docs / "keep.md").write_text("# Keep\n\nThis file should be indexed successfully.")
-        (docs / "skip.draft.md").write_text("# Draft\n\nThis should be skipped by ignore rules.")
+        (docs / "keep.md").write_text(
+            "# Keep\n\nThis file should be indexed successfully."
+        )
+        (docs / "skip.draft.md").write_text(
+            "# Draft\n\nThis should be skipped by ignore rules."
+        )
         (docs / ".kbignore").write_text("*.draft.md\n")
 
         client = _mock_openai_client()

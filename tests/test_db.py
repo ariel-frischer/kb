@@ -86,6 +86,85 @@ class TestConnect:
         assert cfg.db_path.exists()
         conn.close()
 
+    def test_v3_to_v4_migration_adds_tags(self, tmp_config):
+        """v3 -> v4 uses ALTER TABLE instead of dropping tables."""
+        import sqlite_vec
+
+        # Create a v3 DB with data
+        tmp_config.db_path.parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(str(tmp_config.db_path))
+        conn.enable_load_extension(True)
+        sqlite_vec.load(conn)
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)"
+        )
+        conn.execute(
+            "INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', '3')"
+        )
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS documents (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                path TEXT UNIQUE NOT NULL,
+                title TEXT,
+                type TEXT,
+                size_bytes INTEGER,
+                content_hash TEXT,
+                indexed_at TEXT DEFAULT (datetime('now')),
+                chunk_count INTEGER DEFAULT 0
+            )
+        """)
+        conn.execute(
+            "INSERT INTO documents (path, title, type, size_bytes, content_hash, chunk_count) "
+            "VALUES ('test.md', 'Test', 'markdown', 100, 'abc', 1)"
+        )
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS chunks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                doc_id INTEGER NOT NULL,
+                chunk_index INTEGER NOT NULL,
+                text TEXT NOT NULL,
+                heading TEXT,
+                heading_ancestry TEXT,
+                char_count INTEGER,
+                content_hash TEXT
+            )
+        """)
+        conn.execute(f"""
+            CREATE VIRTUAL TABLE IF NOT EXISTS vec_chunks USING vec0(
+                chunk_id INTEGER PRIMARY KEY,
+                embedding float[{tmp_config.embed_dims}],
+                +chunk_text TEXT,
+                +doc_path TEXT,
+                +heading TEXT
+            )
+        """)
+        conn.execute("""
+            CREATE VIRTUAL TABLE IF NOT EXISTS fts_chunks USING fts5(
+                text,
+                heading,
+                content='chunks',
+                content_rowid='id'
+            )
+        """)
+        conn.commit()
+        conn.close()
+
+        # Reconnect — should migrate v3->v4 without dropping data
+        conn2 = connect(tmp_config)
+        count = conn2.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
+        assert count == 1  # data preserved
+        # tags column exists
+        row = conn2.execute(
+            "SELECT tags FROM documents WHERE path = 'test.md'"
+        ).fetchone()
+        assert row["tags"] == ""
+        # Schema version updated
+        version = conn2.execute(
+            "SELECT value FROM meta WHERE key = 'schema_version'"
+        ).fetchone()
+        assert int(version[0]) == SCHEMA_VERSION
+        conn2.close()
+
     def test_row_factory_enabled(self, tmp_config):
         conn = connect(tmp_config)
         conn.execute(

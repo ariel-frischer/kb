@@ -169,18 +169,23 @@ class TestMainDispatch:
         with patch("sys.argv", ["kb"]):
             with pytest.raises(SystemExit):
                 from kb.cli import main
+
                 main()
 
     def test_help_flag(self, capsys):
         with patch("sys.argv", ["kb", "--help"]):
             with pytest.raises(SystemExit) as exc_info:
                 from kb.cli import main
+
                 main()
             assert exc_info.value.code == 0
 
     def test_unknown_command(self, capsys):
-        with patch("sys.argv", ["kb", "bogus"]), \
-             patch("kb.cli.find_config", return_value=Config()):
+        with (
+            patch("sys.argv", ["kb", "bogus"]),
+            patch("kb.cli.find_config", return_value=Config()),
+        ):
             with pytest.raises(SystemExit):
                 from kb.cli import main
+
                 main()

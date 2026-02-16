@@ -21,9 +21,21 @@ def connect(cfg: Config) -> sqlite3.Connection:
     current = int(row[0]) if row else 0
 
     if current < SCHEMA_VERSION:
-        print(f"Schema upgrade v{current} -> v{SCHEMA_VERSION}, rebuilding tables...")
-        for table in ["vec_chunks", "fts_chunks", "chunks", "documents"]:
-            conn.execute(f"DROP TABLE IF EXISTS {table}")
+        if current == 3:
+            # Non-destructive migration: add tags column
+            print(
+                f"Schema upgrade v{current} -> v{SCHEMA_VERSION}, adding tags column..."
+            )
+            try:
+                conn.execute("ALTER TABLE documents ADD COLUMN tags TEXT DEFAULT ''")
+            except sqlite3.OperationalError:
+                pass  # column already exists
+        else:
+            print(
+                f"Schema upgrade v{current} -> v{SCHEMA_VERSION}, rebuilding tables..."
+            )
+            for table in ["vec_chunks", "fts_chunks", "chunks", "documents"]:
+                conn.execute(f"DROP TABLE IF EXISTS {table}")
         conn.execute(
             "INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', ?)",
             (str(SCHEMA_VERSION),),
@@ -39,7 +51,8 @@ def connect(cfg: Config) -> sqlite3.Connection:
             size_bytes INTEGER,
             content_hash TEXT,
             indexed_at TEXT DEFAULT (datetime('now')),
-            chunk_count INTEGER DEFAULT 0
+            chunk_count INTEGER DEFAULT 0,
+            tags TEXT DEFAULT ''
         )
     """)
     conn.execute("""

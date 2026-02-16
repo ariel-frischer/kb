@@ -4,7 +4,7 @@ import struct
 from unittest.mock import MagicMock
 
 from kb.config import Config
-from kb.embed import embed_batch, serialize_f32
+from kb.embed import deserialize_f32, embed_batch, serialize_f32
 
 
 class TestSerializeF32:
@@ -23,6 +23,25 @@ class TestSerializeF32:
     def test_single_element(self):
         serialized = serialize_f32([42.0])
         assert len(serialized) == 4
+
+
+class TestDeserializeF32:
+    def test_roundtrip(self):
+        vec = [1.0, 2.5, -3.14, 0.0]
+        blob = serialize_f32(vec)
+        result = deserialize_f32(blob)
+        assert len(result) == len(vec)
+        for a, b in zip(vec, result):
+            assert abs(a - b) < 1e-5
+
+    def test_empty(self):
+        assert deserialize_f32(b"") == []
+
+    def test_single_element(self):
+        blob = serialize_f32([42.0])
+        result = deserialize_f32(blob)
+        assert len(result) == 1
+        assert abs(result[0] - 42.0) < 1e-5
 
 
 class TestEmbedBatch:

@@ -69,8 +69,7 @@ class TestChunkMarkdownRegex:
 
     def test_oversized_section_gets_split(self):
         text = "# Big Section\n\n" + "\n\n".join(
-            f"Paragraph {i} with enough content to fill space." * 5
-            for i in range(20)
+            f"Paragraph {i} with enough content to fill space." * 5 for i in range(20)
         )
         cfg = Config(max_chunk_chars=200, min_chunk_chars=10)
         chunks = _chunk_markdown_regex(text, cfg)
@@ -91,7 +90,9 @@ class TestChunkMarkdownRegex:
         assert chunks == []
 
     def test_no_headings(self):
-        text = "Just a paragraph with enough content to not be filtered out by min chars."
+        text = (
+            "Just a paragraph with enough content to not be filtered out by min chars."
+        )
         cfg = Config(max_chunk_chars=5000, min_chunk_chars=10)
         chunks = _chunk_markdown_regex(text, cfg)
         assert len(chunks) == 1
@@ -117,7 +118,9 @@ class TestSplitSection:
 
 class TestChunkPlainText:
     def test_basic_plain_text(self):
-        text = "\n\n".join(f"This is paragraph {i} with some content." for i in range(5))
+        text = "\n\n".join(
+            f"This is paragraph {i} with some content." for i in range(5)
+        )
         cfg = Config(max_chunk_chars=5000, min_chunk_chars=10)
         chunks = chunk_plain_text(text, cfg)
         assert len(chunks) >= 1

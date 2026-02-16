@@ -5,7 +5,14 @@ from pathlib import Path
 
 import pytest
 
-from kb.config import Config, _load_toml, _to_toml, find_config, load_secrets, save_config
+from kb.config import (
+    Config,
+    _load_toml,
+    _to_toml,
+    find_config,
+    load_secrets,
+    save_config,
+)
 
 
 class TestConfigDataclass:
@@ -112,9 +119,7 @@ class TestLoadToml:
     def test_loads_project_config(self, tmp_path):
         cfg_path = tmp_path / ".kb.toml"
         cfg_path.write_text(
-            'db = "my.db"\n'
-            'sources = ["docs/"]\n'
-            'embed_model = "custom-model"\n'
+            'db = "my.db"\nsources = ["docs/"]\nembed_model = "custom-model"\n'
         )
         cfg = _load_toml(cfg_path, "project")
         assert cfg.db == "my.db"
@@ -152,7 +157,7 @@ class TestFindConfig:
 
     def test_walks_up_to_find_config(self, tmp_path, monkeypatch):
         cfg_path = tmp_path / ".kb.toml"
-        cfg_path.write_text('sources = []\n')
+        cfg_path.write_text("sources = []\n")
         subdir = tmp_path / "sub" / "deep"
         subdir.mkdir(parents=True)
         monkeypatch.chdir(subdir)

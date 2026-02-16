@@ -7,7 +7,13 @@ import pytest
 
 from kb.config import Config
 from kb.db import connect
-from kb.ingest import _index_file, _is_ignored, _load_ignore_patterns, md5_hash
+from kb.ingest import (
+    _index_file,
+    _is_ignored,
+    _load_ignore_patterns,
+    _parse_frontmatter_tags,
+    md5_hash,
+)
 
 
 class TestMd5Hash:
@@ -68,6 +74,31 @@ class TestIsIgnored:
         assert not _is_ignored(tmp_path / "good.md", tmp_path, ["*.tmp"])
 
 
+class TestParseFrontmatterTags:
+    def test_inline_tags(self):
+        text = "---\ntags: [python, tutorial]\n---\n# Hello\nBody"
+        assert _parse_frontmatter_tags(text) == ["python", "tutorial"]
+
+    def test_list_tags(self):
+        text = "---\ntags:\n  - python\n  - tutorial\n---\n# Hello\nBody"
+        assert _parse_frontmatter_tags(text) == ["python", "tutorial"]
+
+    def test_no_frontmatter(self):
+        assert _parse_frontmatter_tags("# Hello\nBody") == []
+
+    def test_no_tags_field(self):
+        text = "---\ntitle: Test\n---\n# Hello\nBody"
+        assert _parse_frontmatter_tags(text) == []
+
+    def test_quoted_inline_tags(self):
+        text = '---\ntags: ["python", "tutorial"]\n---\n# Hello\nBody'
+        assert _parse_frontmatter_tags(text) == ["python", "tutorial"]
+
+    def test_empty_tags(self):
+        text = "---\ntags: []\n---\n# Hello\nBody"
+        assert _parse_frontmatter_tags(text) == []
+
+
 class TestIndexFile:
     @pytest.fixture
     def index_setup(self, tmp_path):
@@ -92,7 +123,9 @@ class TestIndexFile:
         assert reused == 0
         assert len(to_embed) > 0
 
-        doc = conn.execute("SELECT * FROM documents WHERE path = 'docs/test.md'").fetchone()
+        doc = conn.execute(
+            "SELECT * FROM documents WHERE path = 'docs/test.md'"
+        ).fetchone()
         assert doc is not None
         assert doc["title"] == "My Doc"
         assert doc["type"] == "markdown"
@@ -113,17 +146,25 @@ class TestIndexFile:
         conn, cfg = index_setup
         to_embed = []
         _index_file(
-            conn, "f.md",
+            conn,
+            "f.md",
             "# V1\n\nOriginal content that is long enough for chunking purposes.",
-            100, "markdown", to_embed, cfg,
+            100,
+            "markdown",
+            to_embed,
+            cfg,
         )
         conn.commit()
 
         to_embed2 = []
         did_index, _ = _index_file(
-            conn, "f.md",
+            conn,
+            "f.md",
             "# V2\n\nUpdated content that is completely different from the original.",
-            120, "markdown", to_embed2, cfg,
+            120,
+            "markdown",
+            to_embed2,
+            cfg,
         )
         assert did_index is True
         assert len(to_embed2) > 0
@@ -133,18 +174,26 @@ class TestIndexFile:
         shared_section = "## Shared\n\nParagraph that stays the same across versions of the document."
         to_embed = []
         _index_file(
-            conn, "f.md",
+            conn,
+            "f.md",
             f"# Title\n\nIntro paragraph with enough content for one chunk.\n\n{shared_section}",
-            100, "markdown", to_embed, cfg,
+            100,
+            "markdown",
+            to_embed,
+            cfg,
         )
         conn.commit()
         first_embed_count = len(to_embed)
 
         to_embed2 = []
         did_index, reused = _index_file(
-            conn, "f.md",
+            conn,
+            "f.md",
             f"# Title\n\nDifferent intro paragraph that changes the first chunk hash.\n\n{shared_section}",
-            120, "markdown", to_embed2, cfg,
+            120,
+            "markdown",
+            to_embed2,
+            cfg,
         )
         assert did_index is True
         # The shared section chunk should be reused (not re-embedded)
@@ -161,9 +210,13 @@ class TestIndexFile:
         conn, cfg = index_setup
         to_embed = []
         _index_file(
-            conn, "f.md",
+            conn,
+            "f.md",
             "# My Great Title\n\nBody content that has enough characters for a chunk.",
-            100, "markdown", to_embed, cfg,
+            100,
+            "markdown",
+            to_embed,
+            cfg,
         )
         conn.commit()
         doc = conn.execute("SELECT title FROM documents WHERE path = 'f.md'").fetchone()
@@ -173,9 +226,13 @@ class TestIndexFile:
         conn, cfg = index_setup
         to_embed = []
         _index_file(
-            conn, "my-file.md",
+            conn,
+            "my-file.md",
             "No heading here, just body text that is long enough for a chunk.",
-            100, "markdown", to_embed, cfg,
+            100,
+            "markdown",
+            to_embed,
+            cfg,
         )
         conn.commit()
         doc = conn.execute(

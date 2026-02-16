@@ -61,6 +61,31 @@ def _is_ignored(file_path: Path, dir_path: Path, patterns: list[str]) -> bool:
     return False
 
 
+def _parse_frontmatter_tags(text: str) -> list[str]:
+    """Extract tags from YAML frontmatter if present."""
+    m = re.match(r"^---\s*\n(.+?)\n---\s*\n", text, re.DOTALL)
+    if not m:
+        return []
+    frontmatter = m.group(1)
+    # Match tags: [tag1, tag2] or tags:\n  - tag1\n  - tag2
+    tm = re.search(r"^tags:\s*\[([^\]]*)\]", frontmatter, re.MULTILINE)
+    if tm:
+        return [t.strip().strip("\"'") for t in tm.group(1).split(",") if t.strip()]
+    tags = []
+    in_tags = False
+    for line in frontmatter.splitlines():
+        if re.match(r"^tags:\s*$", line):
+            in_tags = True
+            continue
+        if in_tags:
+            m = re.match(r"^\s+-\s+(.+)", line)
+            if m:
+                tags.append(m.group(1).strip().strip("\"'"))
+            else:
+                break
+    return tags
+
+
 def _index_file(
     conn: sqlite3.Connection,
     rel_path: str,
@@ -69,6 +94,7 @@ def _index_file(
     doc_type: str,
     to_embed: list,
     cfg: Config,
+    tags: str = "",
 ) -> tuple[bool, int]:
     """Index a single file's text into chunks. Returns (indexed, reused_count)."""
     file_hash = md5_hash(text)
@@ -104,14 +130,14 @@ def _index_file(
     if doc_id:
         conn.execute(
             "UPDATE documents SET title=?, content_hash=?, size_bytes=?, "
-            "type=?, chunk_count=?, indexed_at=datetime('now') WHERE id=?",
-            (title, file_hash, file_size, doc_type, len(chunks), doc_id),
+            "type=?, chunk_count=?, tags=?, indexed_at=datetime('now') WHERE id=?",
+            (title, file_hash, file_size, doc_type, len(chunks), tags, doc_id),
         )
     else:
         conn.execute(
-            "INSERT INTO documents (path, title, type, size_bytes, content_hash, chunk_count) "
-            "VALUES (?,?,?,?,?,?)",
-            (rel_path, title, doc_type, file_size, file_hash, len(chunks)),
+            "INSERT INTO documents (path, title, type, size_bytes, content_hash, chunk_count, tags) "
+            "VALUES (?,?,?,?,?,?,?)",
+            (rel_path, title, doc_type, file_size, file_hash, len(chunks), tags),
         )
         doc_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
 
@@ -218,7 +244,9 @@ def index_directory(dir_path: Path, cfg: Config, *, no_size_limit: bool = False)
         if not no_size_limit and not _check_file_size(file_path, cfg, dir_path):
             rel = cfg.doc_path_for_db(file_path, dir_path)
             mb = file_path.stat().st_size / (1024 * 1024)
-            print(f"  SKIP (too large): {rel} ({mb:.1f} MB > {cfg.max_file_size_mb} MB)")
+            print(
+                f"  SKIP (too large): {rel} ({mb:.1f} MB > {cfg.max_file_size_mb} MB)"
+            )
             size_skipped += 1
             continue
 
@@ -237,8 +265,21 @@ def index_directory(dir_path: Path, cfg: Config, *, no_size_limit: bool = False)
         if len(text.strip()) < cfg.min_chunk_chars:
             continue
 
+        tags = ""
+        if doc_type == "markdown":
+            parsed_tags = _parse_frontmatter_tags(text)
+            if parsed_tags:
+                tags = ",".join(parsed_tags)
+
         did_index, reused = _index_file(
-            conn, rel_path, text, file_path.stat().st_size, doc_type, to_embed, cfg
+            conn,
+            rel_path,
+            text,
+            file_path.stat().st_size,
+            doc_type,
+            to_embed,
+            cfg,
+            tags=tags,
         )
         if did_index:
             indexed += 1

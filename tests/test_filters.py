@@ -51,6 +51,21 @@ class TestParseFilters:
         assert filters["date_after"] == "2026-01-01"
         assert filters["must_contain"] == ["important"]
 
+    def test_type_glob(self):
+        query, filters = parse_filters("type:markdown search terms")
+        assert query == "search terms"
+        assert filters["type_glob"] == "markdown"
+
+    def test_tag_single(self):
+        query, filters = parse_filters("tag:python search terms")
+        assert query == "search terms"
+        assert filters["tags"] == ["python"]
+
+    def test_tag_multiple(self):
+        query, filters = parse_filters("tag:python tag:tutorial search terms")
+        assert query == "search terms"
+        assert filters["tags"] == ["python", "tutorial"]
+
     def test_collapses_whitespace(self):
         query, _ = parse_filters("file:x.md   lots   of   space")
         assert query == "lots of space"
@@ -111,6 +126,71 @@ class TestApplyFilters:
         result = apply_filters(sample_chunks, filters, None)
         assert all(r["chunk_id"] != 3 for r in result)
 
+    def test_type_glob_filters(self, tmp_path):
+        db_path = tmp_path / "test.db"
+        conn = sqlite3.connect(str(db_path))
+        conn.row_factory = sqlite3.Row
+        conn.execute(
+            "CREATE TABLE documents (id INTEGER PRIMARY KEY, path TEXT, type TEXT)"
+        )
+        conn.execute("INSERT INTO documents VALUES (1, 'docs/guide.md', 'markdown')")
+        conn.execute("INSERT INTO documents VALUES (2, 'docs/manual.pdf', 'pdf')")
+        conn.commit()
+
+        results = [
+            {"chunk_id": 1, "doc_path": "docs/guide.md", "text": "markdown content"},
+            {"chunk_id": 2, "doc_path": "docs/manual.pdf", "text": "pdf content"},
+        ]
+        _, filters = parse_filters("type:markdown query")
+        result = apply_filters(results, filters, conn)
+        assert len(result) == 1
+        assert result[0]["doc_path"] == "docs/guide.md"
+        conn.close()
+
+    def test_tag_filters(self, tmp_path):
+        db_path = tmp_path / "test.db"
+        conn = sqlite3.connect(str(db_path))
+        conn.row_factory = sqlite3.Row
+        conn.execute(
+            "CREATE TABLE documents (id INTEGER PRIMARY KEY, path TEXT, tags TEXT)"
+        )
+        conn.execute("INSERT INTO documents VALUES (1, 'a.md', 'python,tutorial')")
+        conn.execute("INSERT INTO documents VALUES (2, 'b.md', 'rust')")
+        conn.execute("INSERT INTO documents VALUES (3, 'c.md', '')")
+        conn.commit()
+
+        results = [
+            {"chunk_id": 1, "doc_path": "a.md", "text": "a"},
+            {"chunk_id": 2, "doc_path": "b.md", "text": "b"},
+            {"chunk_id": 3, "doc_path": "c.md", "text": "c"},
+        ]
+        _, filters = parse_filters("tag:python query")
+        result = apply_filters(results, filters, conn)
+        assert len(result) == 1
+        assert result[0]["doc_path"] == "a.md"
+        conn.close()
+
+    def test_tag_filters_multiple(self, tmp_path):
+        db_path = tmp_path / "test.db"
+        conn = sqlite3.connect(str(db_path))
+        conn.row_factory = sqlite3.Row
+        conn.execute(
+            "CREATE TABLE documents (id INTEGER PRIMARY KEY, path TEXT, tags TEXT)"
+        )
+        conn.execute("INSERT INTO documents VALUES (1, 'a.md', 'python,tutorial')")
+        conn.execute("INSERT INTO documents VALUES (2, 'b.md', 'python')")
+        conn.commit()
+
+        results = [
+            {"chunk_id": 1, "doc_path": "a.md", "text": "a"},
+            {"chunk_id": 2, "doc_path": "b.md", "text": "b"},
+        ]
+        _, filters = parse_filters("tag:python tag:tutorial query")
+        result = apply_filters(results, filters, conn)
+        assert len(result) == 1
+        assert result[0]["doc_path"] == "a.md"
+        conn.close()
+
     def test_date_filters(self, tmp_path):
         # Need a real DB for date filtering
         db_path = tmp_path / "test.db"
@@ -119,12 +199,8 @@ class TestApplyFilters:
         conn.execute(
             "CREATE TABLE documents (id INTEGER PRIMARY KEY, path TEXT, indexed_at TEXT)"
         )
-        conn.execute(
-            "INSERT INTO documents VALUES (1, 'old.md', '2025-12-01')"
-        )
-        conn.execute(
-            "INSERT INTO documents VALUES (2, 'new.md', '2026-02-10')"
-        )
+        conn.execute("INSERT INTO documents VALUES (1, 'old.md', '2025-12-01')")
+        conn.execute("INSERT INTO documents VALUES (2, 'new.md', '2026-02-10')")
         conn.commit()
 
         results = [

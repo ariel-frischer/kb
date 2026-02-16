@@ -21,7 +21,7 @@ from .config import (
     save_config,
 )
 from .db import connect, reset
-from .embed import serialize_f32
+from .embed import deserialize_f32, serialize_f32
 from .filters import apply_filters, has_active_filters, parse_filters
 from .extract import supported_extensions, unavailable_formats
 from .ingest import index_directory
@@ -44,6 +44,10 @@ Usage:
   kb allow <file>                Whitelist a large file for indexing
   kb search "query" [k]          Hybrid semantic + keyword search (default k=5)
   kb ask "question" [k]          RAG: search + LLM rerank + answer (default k=8)
+  kb similar <file> [k]          Find similar documents (no API call, default k=10)
+  kb tag <file> tag1 [tag2...]   Add tags to a document
+  kb untag <file> tag1 [tag2...]  Remove tags from a document
+  kb tags                        List all tags with document counts
   kb list                        List indexed documents
   kb stats                       Show index statistics and supported formats
   kb reset                       Drop database and start fresh
@@ -51,6 +55,8 @@ Usage:
 
 Search filters (inline with query):
   file:articles/*.md             Glob filter on file path
+  type:markdown                  Filter by document type (markdown, pdf, etc.)
+  tag:python                     Filter by tag
   dt>"2026-02-01"                After date
   dt<"2026-02-14"                Before date
   +"keyword"                     Must contain
@@ -61,7 +67,10 @@ Examples:
   kb add ~/notes ~/docs          # add sources
   kb index                       # index all sources
   kb search 'file:articles/*.md cost optimization'
+  kb search 'type:pdf tag:python machine learning'
   kb ask 'dt>"2026-02-01" what deployment patterns?'
+  kb similar docs/guide.md       # find related documents
+  kb tag docs/guide.md python tutorial  # add tags
   kb init --project              # project-local mode
 """
 
@@ -436,6 +445,208 @@ def cmd_ask(question: str, cfg: Config, top_k: int = 8):
     conn.close()
 
 
+def _resolve_doc_path(
+    cfg: Config, conn: sqlite3.Connection, file_arg: str
+) -> str | None:
+    """Resolve a file argument to a doc_path in the DB."""
+    p = Path(file_arg).expanduser().resolve()
+
+    # Try relative to config_dir
+    if cfg.config_dir:
+        try:
+            rel = str(p.relative_to(cfg.config_dir))
+            row = conn.execute(
+                "SELECT path FROM documents WHERE path = ?", (rel,)
+            ).fetchone()
+            if row:
+                return row["path"]
+        except ValueError:
+            pass
+
+    # Try as-is
+    row = conn.execute(
+        "SELECT path FROM documents WHERE path = ?", (file_arg,)
+    ).fetchone()
+    if row:
+        return row["path"]
+
+    # Try matching suffix
+    rows = conn.execute("SELECT path FROM documents").fetchall()
+    for r in rows:
+        if r["path"].endswith(file_arg) or file_arg.endswith(r["path"]):
+            return r["path"]
+
+    return None
+
+
+def cmd_similar(file_arg: str, cfg: Config, top_k: int = 10):
+    if not cfg.db_path.exists():
+        print("No index found. Run 'kb index' first.")
+        sys.exit(1)
+
+    conn = connect(cfg)
+
+    doc_path = _resolve_doc_path(cfg, conn, file_arg)
+    if not doc_path:
+        print(f"File not in index: {file_arg}")
+        print("Run 'kb index' to index it first.")
+        conn.close()
+        sys.exit(1)
+
+    # Get chunk IDs for this document
+    chunk_ids = [
+        r["id"]
+        for r in conn.execute(
+            "SELECT c.id FROM chunks c JOIN documents d ON d.id = c.doc_id WHERE d.path = ?",
+            (doc_path,),
+        ).fetchall()
+    ]
+
+    if not chunk_ids:
+        print(f"No chunks found for {doc_path}.")
+        conn.close()
+        sys.exit(1)
+
+    # Read embeddings and average them
+    embeddings = []
+    for cid in chunk_ids:
+        row = conn.execute(
+            "SELECT embedding FROM vec_chunks WHERE chunk_id = ?", (cid,)
+        ).fetchone()
+        if row:
+            embeddings.append(deserialize_f32(row["embedding"]))
+
+    if not embeddings:
+        print(f"No embeddings found for {doc_path}.")
+        conn.close()
+        sys.exit(1)
+
+    # Average into a single vector
+    dims = len(embeddings[0])
+    avg = [sum(e[d] for e in embeddings) / len(embeddings) for d in range(dims)]
+
+    # KNN query — fetch extra to account for self-document filtering
+    fetch_k = top_k + len(chunk_ids) + 5
+    rows = conn.execute(
+        "SELECT chunk_id, distance, doc_path FROM vec_chunks "
+        "WHERE embedding MATCH ? AND k = ? ORDER BY distance",
+        (serialize_f32(avg), fetch_k),
+    ).fetchall()
+
+    # Aggregate by document, skip source document
+    best_per_doc: dict[str, float] = {}
+    for r in rows:
+        dp = r["doc_path"]
+        if dp == doc_path:
+            continue
+        dist = r["distance"]
+        if dp not in best_per_doc or dist < best_per_doc[dp]:
+            best_per_doc[dp] = dist
+
+    # Sort by similarity (1 - distance) descending
+    ranked = sorted(best_per_doc.items(), key=lambda x: x[1])[:top_k]
+
+    if not ranked:
+        print(f"No similar documents found for {doc_path}.")
+        conn.close()
+        return
+
+    # Get titles
+    titles = {}
+    for r in conn.execute("SELECT path, title FROM documents").fetchall():
+        titles[r["path"]] = r["title"]
+
+    print(f"Documents similar to: {doc_path}\n")
+    for i, (dp, dist) in enumerate(ranked, 1):
+        sim = 1 - dist
+        title = titles.get(dp, "")
+        print(f"--- [{i}] {dp} (sim:{sim:.3f}) ---")
+        if title:
+            print(f"    {title}")
+
+    conn.close()
+
+
+def cmd_tag(cfg: Config, file_arg: str, new_tags: list[str]):
+    if not cfg.db_path.exists():
+        print("No index found. Run 'kb index' first.")
+        sys.exit(1)
+
+    conn = connect(cfg)
+    doc_path = _resolve_doc_path(cfg, conn, file_arg)
+    if not doc_path:
+        print(f"File not in index: {file_arg}")
+        conn.close()
+        sys.exit(1)
+
+    row = conn.execute(
+        "SELECT tags FROM documents WHERE path = ?", (doc_path,)
+    ).fetchone()
+    existing = {t.strip().lower() for t in (row["tags"] or "").split(",") if t.strip()}
+    existing.update(t.lower() for t in new_tags)
+    conn.execute(
+        "UPDATE documents SET tags = ? WHERE path = ?",
+        (",".join(sorted(existing)), doc_path),
+    )
+    conn.commit()
+    print(f"Tags for {doc_path}: {', '.join(sorted(existing))}")
+    conn.close()
+
+
+def cmd_untag(cfg: Config, file_arg: str, remove_tags: list[str]):
+    if not cfg.db_path.exists():
+        print("No index found. Run 'kb index' first.")
+        sys.exit(1)
+
+    conn = connect(cfg)
+    doc_path = _resolve_doc_path(cfg, conn, file_arg)
+    if not doc_path:
+        print(f"File not in index: {file_arg}")
+        conn.close()
+        sys.exit(1)
+
+    row = conn.execute(
+        "SELECT tags FROM documents WHERE path = ?", (doc_path,)
+    ).fetchone()
+    existing = {t.strip().lower() for t in (row["tags"] or "").split(",") if t.strip()}
+    existing -= {t.lower() for t in remove_tags}
+    conn.execute(
+        "UPDATE documents SET tags = ? WHERE path = ?",
+        (",".join(sorted(existing)), doc_path),
+    )
+    conn.commit()
+    if existing:
+        print(f"Tags for {doc_path}: {', '.join(sorted(existing))}")
+    else:
+        print(f"All tags removed from {doc_path}")
+    conn.close()
+
+
+def cmd_tags(cfg: Config):
+    if not cfg.db_path.exists():
+        print("No index found. Run 'kb index' first.")
+        sys.exit(1)
+
+    conn = connect(cfg)
+    rows = conn.execute("SELECT tags FROM documents WHERE tags != ''").fetchall()
+    conn.close()
+
+    if not rows:
+        print("No tagged documents.")
+        return
+
+    counts: dict[str, int] = {}
+    for r in rows:
+        for tag in r["tags"].split(","):
+            tag = tag.strip().lower()
+            if tag:
+                counts[tag] = counts.get(tag, 0) + 1
+
+    print(f"{len(counts)} tags across {len(rows)} documents\n")
+    for tag, count in sorted(counts.items()):
+        print(f"  {tag:<30} {count} doc{'s' if count != 1 else ''}")
+
+
 def cmd_stats(cfg: Config):
     if not cfg.db_path.exists():
         print("No index found.")
@@ -476,8 +687,10 @@ def cmd_stats(cfg: Config):
     print(
         f"  LLM rerank:         yes (ask mode, top-{cfg.rerank_fetch_k} -> top-{cfg.rerank_top_k})"
     )
-    print('  Pre-search filters: yes (file:, dt>, dt<, +"kw", -"kw")')
-    print(f"  Index code files:   {'yes' if cfg.index_code else 'no (set index_code = true)'}")
+    print('  Pre-search filters: yes (file:, type:, tag:, dt>, dt<, +"kw", -"kw")')
+    print(
+        f"  Index code files:   {'yes' if cfg.index_code else 'no (set index_code = true)'}"
+    )
 
     exts = sorted(supported_extensions(include_code=cfg.index_code))
     print(f"  Supported formats:  {', '.join(exts)}")
@@ -533,7 +746,7 @@ def cmd_list(cfg: Config):
 
 
 def cmd_completion(shell: str):
-    subcommands = "init add remove sources index allow search ask stats reset list completion"
+    subcommands = "init add remove sources index allow search ask similar tag untag tags stats reset list completion"
 
     if shell == "zsh":
         print(f"""\
@@ -573,9 +786,13 @@ complete -F _kb kb""")
         print("# Fish completions for kb")
         for c in cmds:
             print(f"complete -c kb -n '__fish_use_subcommand' -a {c}")
-        print("complete -c kb -n '__fish_seen_subcommand_from add remove index allow' -F")
+        print(
+            "complete -c kb -n '__fish_seen_subcommand_from add remove index allow' -F"
+        )
         print("complete -c kb -n '__fish_seen_subcommand_from init' -a '--project'")
-        print("complete -c kb -n '__fish_seen_subcommand_from completion' -a 'zsh bash fish'")
+        print(
+            "complete -c kb -n '__fish_seen_subcommand_from completion' -a 'zsh bash fish'"
+        )
     else:
         print(f"Unsupported shell: {shell}")
         print("Supported: zsh, bash, fish")
@@ -643,6 +860,24 @@ def main():
             sys.exit(1)
         top_k = int(args[2]) if len(args) > 2 else 8
         cmd_ask(args[1], cfg, top_k)
+    elif cmd == "similar":
+        if len(args) < 2:
+            print("Usage: kb similar <file> [k]")
+            sys.exit(1)
+        top_k = int(args[2]) if len(args) > 2 else 10
+        cmd_similar(args[1], cfg, top_k)
+    elif cmd == "tag":
+        if len(args) < 3:
+            print("Usage: kb tag <file> tag1 [tag2...]")
+            sys.exit(1)
+        cmd_tag(cfg, args[1], args[2:])
+    elif cmd == "untag":
+        if len(args) < 3:
+            print("Usage: kb untag <file> tag1 [tag2...]")
+            sys.exit(1)
+        cmd_untag(cfg, args[1], args[2:])
+    elif cmd == "tags":
+        cmd_tags(cfg)
     elif cmd == "list":
         cmd_list(cfg)
     elif cmd == "stats":

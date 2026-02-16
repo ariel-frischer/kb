@@ -1,6 +1,5 @@
 """Tests for kb.search — FTS escape, RRF fusion, backfill."""
 
-
 import pytest
 
 from kb.config import Config

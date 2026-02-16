@@ -1,6 +1,5 @@
 """Tests for kb.ingest — file indexing, hashing, ignore patterns."""
 
-
 import pytest
 
 from kb.config import Config

@@ -743,7 +743,9 @@ def cmd_list(cfg: Config, full: bool = False):
             chunks = r["chunk_count"] or 0
             size = r["size_bytes"] or 0
             date = (r["indexed_at"] or "")[:10]
-            print(f"  {path:<50} {doc_type:<12} {chunks:>3} chunks  {_format_size(size):>10}  {date}")
+            print(
+                f"  {path:<50} {doc_type:<12} {chunks:>3} chunks  {_format_size(size):>10}  {date}"
+            )
         return
 
     # Summary view: count and size by type
@@ -762,10 +764,16 @@ def cmd_list(cfg: Config, full: bool = False):
         type_stats[doc_type]["size"] += size
         type_stats[doc_type]["chunks"] += chunks
 
-    print(f"{len(rows)} documents indexed ({_format_size(total_size)}, {total_chunks} chunks)\n")
-    for doc_type in sorted(type_stats, key=lambda t: type_stats[t]["count"], reverse=True):
+    print(
+        f"{len(rows)} documents indexed ({_format_size(total_size)}, {total_chunks} chunks)\n"
+    )
+    for doc_type in sorted(
+        type_stats, key=lambda t: type_stats[t]["count"], reverse=True
+    ):
         s = type_stats[doc_type]
-        print(f"  {doc_type:<12} {s['count']:>4} docs  {s['chunks']:>5} chunks  {_format_size(s['size']):>10}")
+        print(
+            f"  {doc_type:<12} {s['count']:>4} docs  {s['chunks']:>5} chunks  {_format_size(s['size']):>10}"
+        )
     print("\nUse 'kb list --full' for per-file details.")
 
 

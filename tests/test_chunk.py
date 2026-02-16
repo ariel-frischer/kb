@@ -1,6 +1,5 @@
 """Tests for kb.chunk — markdown/plain text chunking, heading extraction."""
 
-
 from kb.chunk import (
     _chunk_markdown_regex,
     _extract_heading_ancestry,

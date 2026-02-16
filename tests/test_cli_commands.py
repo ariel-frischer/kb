@@ -184,6 +184,81 @@ class TestCmdSearch:
         # Should have at most 1 result block
         assert out.count("--- [") <= 1
 
+    def test_threshold_reduces_result_count(self, tmp_path, capsys):
+        """Threshold should remove low-similarity results, not backfill with FTS-only."""
+        cfg = Config(embed_dims=4, threshold=0.99)
+        cfg.scope = "project"
+        cfg.config_dir = tmp_path
+        cfg.config_path = tmp_path / ".kb.toml"
+        cfg.db_path = tmp_path / "kb.db"
+
+        conn = connect(cfg)
+        # Insert two docs with known embeddings
+        for i, (text, path) in enumerate(
+            [("relevant text about topic", "a.md"), ("unrelated filler", "b.md")]
+        ):
+            conn.execute(
+                "INSERT INTO documents (path, title, type, size_bytes, content_hash, chunk_count) "
+                "VALUES (?, ?, 'markdown', 100, ?, 1)",
+                (path, path, f"h{i}"),
+            )
+            doc_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+            conn.execute(
+                "INSERT INTO chunks (doc_id, chunk_index, text, heading, char_count) "
+                "VALUES (?, 0, ?, 'H', ?)",
+                (doc_id, text, len(text)),
+            )
+            chunk_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+            emb = [0.1 * (i + 1)] * 4
+            conn.execute(
+                "INSERT INTO vec_chunks (chunk_id, embedding, chunk_text, doc_path, heading) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (chunk_id, serialize_f32(emb), text, path, "H"),
+            )
+        conn.execute("INSERT INTO fts_chunks(fts_chunks) VALUES('rebuild')")
+        conn.commit()
+        conn.close()
+
+        # Query returns results but all have low similarity -> threshold filters them out
+        client = _mock_openai_client(embed_dims=4)
+        client.embeddings.create.return_value.data = [MagicMock(embedding=[0.9] * 4)]
+
+        with patch("kb.cli.OpenAI", return_value=client):
+            cmd_search("topic", cfg, top_k=5, threshold=0.99)
+
+        out = capsys.readouterr().out
+        # With threshold=0.99, low-similarity vec results should be removed,
+        # NOT replaced by FTS-only backfills
+        result_count = out.count("--- [")
+        assert result_count < 2, (
+            f"Expected threshold to reduce results, got {result_count}"
+        )
+
+    def test_threshold_does_not_backfill_fts(self, populated_db, capsys):
+        """After threshold filtering, result count should be <= top_k, not padded."""
+        client = _mock_openai_client(embed_dims=4)
+        # Use a very far query vector so similarity is low
+        client.embeddings.create.return_value.data = [MagicMock(embedding=[0.99] * 4)]
+
+        with patch("kb.cli.OpenAI", return_value=client):
+            # threshold=0 (no filter) -> get results
+            cmd_search("install", populated_db, top_k=5, threshold=0.0)
+
+        out_no_filter = capsys.readouterr().out
+        count_no_filter = out_no_filter.count("--- [")
+
+        with patch("kb.cli.OpenAI", return_value=client):
+            # threshold=0.99 (strict filter) -> should get fewer results
+            cmd_search("install", populated_db, top_k=5, threshold=0.99)
+
+        out_filtered = capsys.readouterr().out
+        count_filtered = out_filtered.count("--- [")
+
+        assert count_filtered <= count_no_filter, (
+            f"Strict threshold should not produce more results: "
+            f"{count_filtered} (filtered) vs {count_no_filter} (unfiltered)"
+        )
+
 
 class TestCmdAsk:
     def test_no_db_exits(self, tmp_path):

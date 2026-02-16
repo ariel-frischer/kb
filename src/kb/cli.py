@@ -241,7 +241,7 @@ def cmd_search(query: str, cfg: Config, top_k: int = 5, threshold: float | None 
     embed_ms = (time.time() - t0) * 1000
 
     has_threshold = cfg.threshold > 0
-    retrieve_k = (top_k * 5) if (has_filters or has_threshold) else (top_k * 3)
+    retrieve_k = (top_k * 5) if has_filters else (top_k * 3)
 
     t0 = time.time()
     vec_rows = conn.execute(
@@ -269,12 +269,14 @@ def cmd_search(query: str, cfg: Config, top_k: int = 5, threshold: float | None 
             pass
     fts_ms = (time.time() - t0) * 1000
 
-    fuse_k = retrieve_k if (has_filters or has_threshold) else top_k
+    fuse_k = retrieve_k if has_filters else top_k
     results = rrf_fuse(vec_results, fts_results, fuse_k, cfg)
     fill_fts_only_results(conn, results)
 
     if has_filters:
         results = apply_filters(results, filters, conn)
+
+    results = results[:top_k]
 
     if has_threshold:
         results = [
@@ -282,8 +284,6 @@ def cmd_search(query: str, cfg: Config, top_k: int = 5, threshold: float | None 
             for r in results
             if r["similarity"] is None or r["similarity"] >= cfg.threshold
         ]
-
-    results = results[:top_k]
 
     print(f'Query: "{clean_query}"')
     print(f"Embed: {embed_ms:.0f}ms | Vec: {vec_ms:.1f}ms | FTS: {fts_ms:.1f}ms")

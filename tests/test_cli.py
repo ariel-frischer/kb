@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 import pytest
 
-from kb.cli import cmd_add, cmd_init, cmd_remove, cmd_sources
+from kb.cli import _best_snippet, cmd_add, cmd_init, cmd_remove, cmd_sources
 from kb.config import (
     PROJECT_CONFIG_FILE,
     Config,
@@ -158,6 +158,93 @@ class TestCmdSources:
         cfg.config_dir = Path("/tmp")
         cmd_sources(cfg)
         assert "No sources" in capsys.readouterr().out
+
+
+class TestBestSnippet:
+    def test_empty_text(self):
+        assert _best_snippet("", "hello") == ""
+
+    def test_none_text(self):
+        assert _best_snippet(None, "hello") == ""
+
+    def test_short_text_returned_as_is(self):
+        assert _best_snippet("short text", "short", width=100) == "short text"
+
+    def test_empty_query(self):
+        text = "a" * 600
+        result = _best_snippet(text, "", width=100)
+        assert result == text[:100]
+
+    def test_no_match_returns_start(self):
+        text = "a" * 600
+        result = _best_snippet(text, "zzz", width=100)
+        assert result == text[:100]
+
+    def test_match_at_start_no_prefix(self):
+        text = "hello world " + "x" * 600
+        result = _best_snippet(text, "hello", width=100)
+        assert result.startswith("hello")
+        assert not result.startswith("...")
+
+    def test_match_in_middle_has_prefix(self):
+        text = "x" * 300 + " NEEDLE " + "y" * 300
+        result = _best_snippet(text, "needle", width=100)
+        assert "..." in result
+        assert "NEEDLE" in result
+
+    def test_match_centered(self):
+        text = "a" * 300 + "MATCH" + "b" * 300
+        result = _best_snippet(text, "match", width=100)
+        assert "MATCH" in result
+        # Match should be roughly centered — not at the edges
+        idx = result.index("MATCH")
+        assert idx > 10
+        assert idx < 80
+
+    def test_match_at_end(self):
+        text = "x" * 500 + "FINDME"
+        result = _best_snippet(text, "findme", width=100)
+        assert "FINDME" in result
+        assert result.endswith("FINDME")
+        assert result.startswith("...")
+
+    def test_match_at_end_no_suffix(self):
+        text = "x" * 500 + "FINDME"
+        result = _best_snippet(text, "findme", width=100)
+        assert not result.endswith("...")
+
+    def test_text_exactly_width(self):
+        text = "a" * 500
+        result = _best_snippet(text, "zzz", width=500)
+        assert result == text
+
+    def test_multiple_query_words_centers_between(self):
+        text = "a" * 200 + "FIRST" + "b" * 100 + "SECOND" + "c" * 200
+        result = _best_snippet(text, "first second", width=200)
+        assert "FIRST" in result or "SECOND" in result
+
+    def test_case_insensitive(self):
+        text = "x" * 300 + "HeLLo WoRLd" + "y" * 300
+        result = _best_snippet(text, "hello world", width=100)
+        assert "HeLLo WoRLd" in result
+
+    def test_special_chars_in_query(self):
+        text = "x" * 300 + "some text here" + "y" * 300
+        result = _best_snippet(text, '"some text"', width=100)
+        assert "some text" in result
+
+    def test_width_1_no_crash(self):
+        text = "abc"
+        result = _best_snippet(text, "b", width=1)
+        assert len(result) >= 1
+
+    def test_single_char_text(self):
+        assert _best_snippet("a", "a") == "a"
+
+    def test_query_with_no_alphanumeric(self):
+        text = "x" * 600
+        result = _best_snippet(text, "!@#$%", width=100)
+        assert result == text[:100]
 
 
 class TestMainDispatch:

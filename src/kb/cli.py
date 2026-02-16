@@ -1,5 +1,6 @@
 """CLI entry point for kb."""
 
+import re
 import sqlite3
 import sys
 import time
@@ -217,6 +218,32 @@ def cmd_index(cfg: Config, args: list[str]):
         index_directory(dir_path, cfg, no_size_limit=no_size_limit)
 
 
+def _best_snippet(text: str, query: str, width: int = 500) -> str:
+    """Return a snippet of text centered around query term matches."""
+    if not text or len(text) <= width:
+        return text or ""
+    words = re.findall(r"\w+", query.lower())
+    if not words:
+        return text[:width]
+    lower = text.lower()
+    # Find all positions of query term matches
+    positions = []
+    for w in words:
+        idx = lower.find(w)
+        if idx >= 0:
+            positions.append(idx)
+    if not positions:
+        return text[:width]
+    # Center the window on the middle of matched term positions
+    center = sum(positions) // len(positions)
+    start = max(0, center - width // 2)
+    end = min(len(text), start + width)
+    start = max(0, end - width)  # adjust if we hit the end
+    prefix = "..." if start > 0 else ""
+    suffix = "..." if end < len(text) else ""
+    return prefix + text[start:end] + suffix
+
+
 def cmd_search(query: str, cfg: Config, top_k: int = 5, threshold: float | None = None):
     if threshold is not None:
         cfg.search_threshold = threshold
@@ -307,10 +334,10 @@ def cmd_search(query: str, cfg: Config, top_k: int = 5, threshold: float | None 
         )
         if r["heading"]:
             print(f"    Section: {r['heading']}")
-        preview = (r["text"] or "")[:300].replace("\n", "\n    ")
+        preview = _best_snippet(r["text"] or "", clean_query).replace("\n", "\n    ")
         print(f"    {preview}")
-        if r["text"] and len(r["text"]) > 300:
-            print(f"    ... ({len(r['text'])} chars)")
+        if r["text"] and len(r["text"]) > 500:
+            print(f"    ({len(r['text'])} chars total)")
         print()
 
     conn.close()

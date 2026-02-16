@@ -84,6 +84,7 @@ kb untag <file> tag1 [tag2...]  Remove tags from a document
 kb tags                        List all tags with document counts
 kb stats                       Show index stats + capabilities
 kb reset                       Drop DB and start fresh
+kb version                     Show version (also: kb v, kb --version)
 kb completion <shell>          Output shell completions (zsh, bash, fish)
 ```
 

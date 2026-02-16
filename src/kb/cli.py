@@ -217,7 +217,9 @@ def cmd_index(cfg: Config, args: list[str]):
         index_directory(dir_path, cfg, no_size_limit=no_size_limit)
 
 
-def cmd_search(query: str, cfg: Config, top_k: int = 5):
+def cmd_search(query: str, cfg: Config, top_k: int = 5, threshold: float | None = None):
+    if threshold is not None:
+        cfg.min_similarity = threshold
     if not cfg.db_path.exists():
         print("No index found. Run 'kb index' first.")
         sys.exit(1)
@@ -238,7 +240,8 @@ def cmd_search(query: str, cfg: Config, top_k: int = 5):
     query_emb = resp.data[0].embedding
     embed_ms = (time.time() - t0) * 1000
 
-    retrieve_k = (top_k * 5) if has_filters else (top_k * 3)
+    has_threshold = cfg.min_similarity > 0
+    retrieve_k = (top_k * 5) if (has_filters or has_threshold) else (top_k * 3)
 
     t0 = time.time()
     vec_rows = conn.execute(
@@ -266,13 +269,21 @@ def cmd_search(query: str, cfg: Config, top_k: int = 5):
             pass
     fts_ms = (time.time() - t0) * 1000
 
-    fuse_k = retrieve_k if has_filters else top_k
+    fuse_k = retrieve_k if (has_filters or has_threshold) else top_k
     results = rrf_fuse(vec_results, fts_results, fuse_k, cfg)
     fill_fts_only_results(conn, results)
 
     if has_filters:
         results = apply_filters(results, filters, conn)
-        results = results[:top_k]
+
+    if has_threshold:
+        results = [
+            r
+            for r in results
+            if r["similarity"] is None or r["similarity"] >= cfg.min_similarity
+        ]
+
+    results = results[:top_k]
 
     print(f'Query: "{clean_query}"')
     print(f"Embed: {embed_ms:.0f}ms | Vec: {vec_ms:.1f}ms | FTS: {fts_ms:.1f}ms")
@@ -782,7 +793,7 @@ def cmd_list(cfg: Config, full: bool = False):
 
 
 def cmd_completion(shell: str):
-    subcommands = "init add remove sources index allow search ask similar tag untag tags stats reset list completion"
+    subcommands = "init add remove sources index allow search ask similar tag untag tags stats reset list version completion"
 
     if shell == "zsh":
         print(f"""\
@@ -916,10 +927,20 @@ def main():
         cmd_index(cfg, args[1:])
     elif cmd == "search":
         if len(args) < 2 or sub_help:
-            print('Usage: kb search "query" [k]')
+            print('Usage: kb search "query" [k] [--threshold N]')
             sys.exit(0 if sub_help else 1)
-        top_k = int(args[2]) if len(args) > 2 else 5
-        cmd_search(args[1], cfg, top_k)
+        threshold = None
+        search_args = list(args[1:])
+        if "--threshold" in search_args:
+            ti = search_args.index("--threshold")
+            if ti + 1 < len(search_args):
+                threshold = float(search_args[ti + 1])
+                del search_args[ti : ti + 2]
+            else:
+                print("--threshold requires a value")
+                sys.exit(1)
+        top_k = int(search_args[1]) if len(search_args) > 1 else 5
+        cmd_search(search_args[0], cfg, top_k, threshold=threshold)
     elif cmd == "ask":
         if len(args) < 2 or sub_help:
             print('Usage: kb ask "question" [k] [--threshold N]')

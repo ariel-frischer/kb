@@ -14,7 +14,7 @@ main() {
     fi
 
     # Install kb as a global tool from git
-    uv tool install --from "git+${REPO}" "kb[all]"
+    uv tool install "kb[all] @ git+${REPO}"
 
     echo ""
     echo "Done! Run 'kb --help' to get started."

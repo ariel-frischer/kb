@@ -766,7 +766,7 @@ def cmd_list(cfg: Config, full: bool = False):
     for doc_type in sorted(type_stats, key=lambda t: type_stats[t]["count"], reverse=True):
         s = type_stats[doc_type]
         print(f"  {doc_type:<12} {s['count']:>4} docs  {s['chunks']:>5} chunks  {_format_size(s['size']):>10}")
-    print(f"\nUse 'kb list --full' for per-file details.")
+    print("\nUse 'kb list --full' for per-file details.")
 
 
 def cmd_completion(shell: str):

@@ -2,7 +2,6 @@
 
 import sqlite3
 
-import pytest
 
 from kb.filters import apply_filters, has_active_filters, parse_filters
 

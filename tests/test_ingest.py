@@ -1,7 +1,5 @@
 """Tests for kb.ingest — file indexing, hashing, ignore patterns."""
 
-from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 import pytest
 

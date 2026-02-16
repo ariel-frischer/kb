@@ -2,7 +2,6 @@
 
 from unittest.mock import MagicMock
 
-import pytest
 
 from kb.config import Config
 from kb.rerank import llm_rerank

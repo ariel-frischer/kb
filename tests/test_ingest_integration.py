@@ -1,6 +1,5 @@
 """Integration tests for kb.ingest — index_directory, orphan cleanup, PDF extraction."""
 
-from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest

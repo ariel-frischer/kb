@@ -1,6 +1,5 @@
 """Tests for kb.chunk — markdown/plain text chunking, heading extraction."""
 
-import pytest
 
 from kb.chunk import (
     _chunk_markdown_regex,

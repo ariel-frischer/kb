@@ -1,11 +1,8 @@
 """Shared fixtures for kb tests."""
 
-import sqlite3
-from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
-import sqlite_vec
 
 from kb.config import Config
 

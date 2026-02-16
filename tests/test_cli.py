@@ -1,6 +1,5 @@
 """Tests for kb.cli — command dispatch and CLI commands."""
 
-import sys
 from pathlib import Path
 from unittest.mock import patch
 
@@ -8,11 +7,8 @@ import pytest
 
 from kb.cli import cmd_add, cmd_init, cmd_remove, cmd_sources
 from kb.config import (
-    GLOBAL_CONFIG_TEMPLATE,
     PROJECT_CONFIG_FILE,
-    PROJECT_CONFIG_TEMPLATE,
     Config,
-    _load_toml,
 )
 
 

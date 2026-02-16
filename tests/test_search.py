@@ -1,6 +1,5 @@
 """Tests for kb.search — FTS escape, RRF fusion, backfill."""
 
-import sqlite3
 
 import pytest
 

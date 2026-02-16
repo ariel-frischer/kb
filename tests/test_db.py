@@ -1,9 +1,7 @@
 """Tests for kb.db — schema creation, migration, reset."""
 
 import sqlite3
-from pathlib import Path
 
-import pytest
 
 from kb.config import SCHEMA_VERSION, Config
 from kb.db import connect, reset

@@ -22,7 +22,7 @@ class TestConfigDataclass:
         assert cfg.chat_model == "gpt-4o-mini"
         assert cfg.max_chunk_chars == 2000
         assert cfg.min_chunk_chars == 50
-        assert cfg.threshold == 0.25
+        assert cfg.threshold == 0.001
         assert cfg.rrf_k == 60.0
         assert cfg.rerank_fetch_k == 20
         assert cfg.rerank_top_k == 5

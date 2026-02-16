@@ -39,7 +39,7 @@ sources = [
 # min_chunk_chars = 50
 
 # Search
-# threshold = 0.25        # minimum cosine similarity to include a result (0.0–1.0)
+# threshold = 0.001        # minimum cosine similarity to include a result (0.0–1.0)
 # rrf_k = 60.0            # RRF smoothing constant
 # rerank_fetch_k = 20     # candidates to fetch for LLM rerank
 # rerank_top_k = 5        # how many to keep after rerank
@@ -91,7 +91,7 @@ class Config:
     chat_model: str = "gpt-4o-mini"
     max_chunk_chars: int = 2000
     min_chunk_chars: int = 50
-    threshold: float = 0.25
+    threshold: float = 0.001
     rrf_k: float = 60.0
     rerank_fetch_k: int = 20
     rerank_top_k: int = 5

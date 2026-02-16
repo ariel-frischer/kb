@@ -43,7 +43,7 @@ Usage:
   kb index [DIR...] [--no-size-limit]  Index sources (skip files > max_file_size_mb)
   kb allow <file>                Whitelist a large file for indexing
   kb search "query" [k]          Hybrid semantic + keyword search (default k=5)
-  kb ask "question" [k] [--threshold N]  RAG: search + rerank + answer (default k=8, threshold=0.25)
+  kb ask "question" [k] [--threshold N]  RAG: search + rerank + answer (default k=8, threshold=0.001)
   kb similar <file> [k]          Find similar documents (no API call, default k=10)
   kb tag <file> tag1 [tag2...]   Add tags to a document
   kb untag <file> tag1 [tag2...]  Remove tags from a document

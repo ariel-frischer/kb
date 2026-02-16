@@ -420,8 +420,8 @@ class TestCmdCompletion:
     def test_zsh(self, capsys):
         cmd_completion("zsh")
         out = capsys.readouterr().out
-        assert "#compdef kb" in out
-        assert "_kb" in out
+        assert "compdef _kb kb" in out
+        assert "_kb()" in out
         assert "init" in out
         assert "list" in out
 

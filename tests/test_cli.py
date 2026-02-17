@@ -29,6 +29,9 @@ class TestCmdInit:
         assert cfg_path.exists()
         content = cfg_path.read_text()
         assert "sources" in content
+        gitignore = tmp_path / ".kb" / ".gitignore"
+        assert gitignore.exists()
+        assert gitignore.read_text() == "*\n"
 
     def test_init_project_already_exists(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)

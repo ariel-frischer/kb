@@ -352,6 +352,8 @@ class TestConnect:
 
     def test_fts_triggers_sync(self, tmp_config):
         """FTS triggers keep fts_chunks in sync with chunks table."""
+        from kb.db import fts_path
+
         conn = connect(tmp_config)
         # Insert a document
         conn.execute(
@@ -360,11 +362,11 @@ class TestConnect:
         )
         doc_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
 
-        # Insert a chunk with doc_path — trigger should sync to FTS
+        # Insert a chunk with doc_path + fts_path — trigger uses fts_path for FTS
         conn.execute(
-            "INSERT INTO chunks (doc_id, chunk_index, text, heading, char_count, doc_path) "
-            "VALUES (?, 0, 'hello world', 'Intro', 11, 'notes/test.md')",
-            (doc_id,),
+            "INSERT INTO chunks (doc_id, chunk_index, text, heading, char_count, doc_path, fts_path) "
+            "VALUES (?, 0, 'hello world', 'Intro', 11, 'notes/test.md', ?)",
+            (doc_id, fts_path("notes/test.md")),
         )
         chunk_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
         conn.commit()
@@ -376,7 +378,7 @@ class TestConnect:
         assert len(fts_rows) == 1
         assert fts_rows[0][0] == chunk_id
 
-        # FTS should find by doc_path
+        # FTS should find by fts_path (stored in doc_path FTS column)
         fts_rows = conn.execute(
             "SELECT rowid FROM fts_chunks WHERE fts_chunks MATCH 'doc_path:\"notes\"'"
         ).fetchall()
@@ -568,6 +570,155 @@ class TestConnect:
         }
         assert triggers == {"fts_ai", "fts_ad", "fts_au"}
         conn.close()
+
+
+class TestFtsPath:
+    def test_short_path(self):
+        from kb.db import fts_path
+
+        assert fts_path("file.md") == "file.md"
+
+    def test_two_components(self):
+        from kb.db import fts_path
+
+        assert fts_path("notes/guide.md") == "notes/guide.md"
+
+    def test_three_components_truncates(self):
+        from kb.db import fts_path
+
+        assert fts_path("openclaw-config/agents/AGENTS.md") == "agents/AGENTS.md"
+
+    def test_deep_path_keeps_last_two(self):
+        from kb.db import fts_path
+
+        assert fts_path("a/b/c/d/file.md") == "d/file.md"
+
+    def test_v7_to_v8_migration_adds_fts_path(self, tmp_config):
+        """v7 -> v8 adds fts_path column and rebuilds FTS with truncated paths."""
+        import sqlite_vec
+
+        from kb.db import fts_path
+
+        tmp_config.db_path.parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(str(tmp_config.db_path))
+        conn.enable_load_extension(True)
+        sqlite_vec.load(conn)
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)"
+        )
+        conn.execute(
+            "INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', '7')"
+        )
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS documents (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                path TEXT UNIQUE NOT NULL,
+                title TEXT,
+                type TEXT,
+                size_bytes INTEGER,
+                content_hash TEXT,
+                indexed_at TEXT DEFAULT (datetime('now')),
+                chunk_count INTEGER DEFAULT 0,
+                tags TEXT DEFAULT ''
+            )
+        """)
+        conn.execute(
+            "INSERT INTO documents (path, title, type, size_bytes, content_hash, chunk_count) "
+            "VALUES ('project/docs/guide.md', 'Guide', 'markdown', 200, 'def', 1)"
+        )
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS chunks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                doc_id INTEGER NOT NULL,
+                chunk_index INTEGER NOT NULL,
+                text TEXT NOT NULL,
+                heading TEXT,
+                heading_ancestry TEXT,
+                char_count INTEGER,
+                content_hash TEXT,
+                doc_path TEXT DEFAULT ''
+            )
+        """)
+        conn.execute(
+            "INSERT INTO chunks (doc_id, chunk_index, text, heading, char_count, doc_path) "
+            "VALUES (1, 0, 'some content', 'Intro', 12, 'project/docs/guide.md')"
+        )
+        conn.execute(f"""
+            CREATE VIRTUAL TABLE IF NOT EXISTS vec_chunks USING vec0(
+                chunk_id INTEGER PRIMARY KEY,
+                embedding float[{tmp_config.embed_dims}],
+                +chunk_text TEXT,
+                +doc_path TEXT,
+                +heading TEXT
+            )
+        """)
+        conn.execute("""
+            CREATE VIRTUAL TABLE IF NOT EXISTS fts_chunks USING fts5(
+                doc_path,
+                heading,
+                text,
+                content='chunks',
+                content_rowid='id',
+                tokenize='porter unicode61'
+            )
+        """)
+        conn.execute("""
+            CREATE TRIGGER IF NOT EXISTS fts_ai AFTER INSERT ON chunks BEGIN
+                INSERT INTO fts_chunks(rowid, doc_path, heading, text)
+                VALUES (new.id, new.doc_path, new.heading, new.text);
+            END
+        """)
+        conn.execute("""
+            CREATE TRIGGER IF NOT EXISTS fts_ad AFTER DELETE ON chunks BEGIN
+                INSERT INTO fts_chunks(fts_chunks, rowid, doc_path, heading, text)
+                VALUES ('delete', old.id, old.doc_path, old.heading, old.text);
+            END
+        """)
+        conn.execute("""
+            CREATE TRIGGER IF NOT EXISTS fts_au AFTER UPDATE ON chunks BEGIN
+                INSERT INTO fts_chunks(fts_chunks, rowid, doc_path, heading, text)
+                VALUES ('delete', old.id, old.doc_path, old.heading, old.text);
+                INSERT INTO fts_chunks(rowid, doc_path, heading, text)
+                VALUES (new.id, new.doc_path, new.heading, new.text);
+            END
+        """)
+        conn.commit()
+        conn.close()
+
+        # Reconnect — should migrate v7->v8
+        conn2 = connect(tmp_config)
+
+        # Data preserved
+        count = conn2.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
+        assert count == 1
+
+        # Schema version updated
+        version = conn2.execute(
+            "SELECT value FROM meta WHERE key = 'schema_version'"
+        ).fetchone()
+        assert int(version[0]) == SCHEMA_VERSION
+
+        # fts_path column exists and is populated (last 2 components)
+        row = conn2.execute(
+            "SELECT fts_path, doc_path FROM chunks WHERE doc_id = 1"
+        ).fetchone()
+        assert row["doc_path"] == "project/docs/guide.md"
+        assert row["fts_path"] == fts_path("project/docs/guide.md")
+        assert row["fts_path"] == "docs/guide.md"
+
+        # FTS can find by truncated path
+        fts_rows = conn2.execute(
+            "SELECT rowid FROM fts_chunks WHERE fts_chunks MATCH 'doc_path:\"docs\"'"
+        ).fetchall()
+        assert len(fts_rows) == 1
+
+        # FTS does NOT match project prefix (truncated away)
+        fts_rows = conn2.execute(
+            "SELECT rowid FROM fts_chunks WHERE fts_chunks MATCH 'doc_path:\"project\"'"
+        ).fetchall()
+        assert len(fts_rows) == 0
+
+        conn2.close()
 
 
 class TestReset:

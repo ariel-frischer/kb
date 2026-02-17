@@ -114,9 +114,7 @@ class TestMethodDispatch:
 
         mock_tokenizer.apply_chat_template.return_value = "formatted prompt"
         mock_inputs = MagicMock()
-        mock_inputs.__getitem__ = MagicMock(
-            return_value=MagicMock(shape=(1, 10))
-        )
+        mock_inputs.__getitem__ = MagicMock(return_value=MagicMock(shape=(1, 10)))
         mock_inputs.to.return_value = mock_inputs
         mock_tokenizer.return_value = mock_inputs
 
@@ -141,9 +139,7 @@ class TestMethodDispatch:
 
         mock_tokenizer.apply_chat_template.return_value = "formatted"
         mock_inputs = MagicMock()
-        mock_inputs.__getitem__ = MagicMock(
-            return_value=MagicMock(shape=(1, 5))
-        )
+        mock_inputs.__getitem__ = MagicMock(return_value=MagicMock(shape=(1, 5)))
         mock_inputs.to.return_value = mock_inputs
         mock_tokenizer.return_value = mock_inputs
 
@@ -195,9 +191,7 @@ class TestMethodDispatch:
             mock_get_model.return_value = (mock_tokenizer, mock_model, "cpu")
             mock_tokenizer.apply_chat_template.return_value = "prompt"
             mock_inputs = MagicMock()
-            mock_inputs.__getitem__ = MagicMock(
-                return_value=MagicMock(shape=(1, 5))
-            )
+            mock_inputs.__getitem__ = MagicMock(return_value=MagicMock(shape=(1, 5)))
             mock_inputs.to.return_value = mock_inputs
             mock_tokenizer.return_value = mock_inputs
 

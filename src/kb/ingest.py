@@ -12,7 +12,7 @@ from openai import OpenAI
 
 from .chunk import CHONKIE_AVAILABLE, chunk_markdown, chunk_plain_text, embedding_text
 from .config import Config
-from .db import connect
+from .db import connect, fts_path
 from .embed import embed_batch, serialize_f32
 from .extract import extract_text, supported_extensions, unavailable_formats
 
@@ -50,9 +50,15 @@ def _check_file_size(file_path: Path, cfg: Config, dir_path: Path) -> bool:
     return False
 
 
+_BUILTIN_EXCLUDES = {".kb"}
+
+
 def _is_ignored(file_path: Path, dir_path: Path, patterns: list[str]) -> bool:
     """Check if a file matches any ignore pattern."""
     rel = str(file_path.relative_to(dir_path))
+    parts = Path(rel).parts
+    if parts and parts[0] in _BUILTIN_EXCLUDES:
+        return True
     for pat in patterns:
         if fnmatch(rel, pat) or fnmatch(file_path.name, pat):
             return True
@@ -159,8 +165,8 @@ def _index_file(
         else:
             conn.execute(
                 "INSERT INTO chunks "
-                "(doc_id, chunk_index, text, heading, heading_ancestry, char_count, content_hash, doc_path) "
-                "VALUES (?,?,?,?,?,?,?,?)",
+                "(doc_id, chunk_index, text, heading, heading_ancestry, char_count, content_hash, doc_path, fts_path) "
+                "VALUES (?,?,?,?,?,?,?,?,?)",
                 (
                     doc_id,
                     i,
@@ -170,6 +176,7 @@ def _index_file(
                     len(chunk["text"]),
                     chunk_hash,
                     rel_path,
+                    fts_path(rel_path),
                 ),
             )
             cid = conn.execute("SELECT last_insert_rowid()").fetchone()[0]

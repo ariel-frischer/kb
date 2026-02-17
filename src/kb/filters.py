@@ -126,5 +126,27 @@ def apply_filters(
     return filtered
 
 
+def get_tag_chunk_count(filters: dict, conn: sqlite3.Connection) -> int:
+    """Return total chunk count of documents matching tag filters.
+
+    Returns 0 if no tag filters are active.
+    """
+    tags = filters.get("tags", [])
+    if not tags:
+        return 0
+    rows = conn.execute("SELECT path, tags FROM documents").fetchall()
+    total = 0
+    for r in rows:
+        raw = r["tags"] or ""
+        doc_tags = {t.strip().lower() for t in raw.split(",") if t.strip()}
+        if all(t in doc_tags for t in tags):
+            count = conn.execute(
+                "SELECT COUNT(*) FROM chunks c JOIN documents d ON d.id = c.doc_id WHERE d.path = ?",
+                (r["path"],),
+            ).fetchone()[0]
+            total += count
+    return total
+
+
 def has_active_filters(filters: dict) -> bool:
     return any(filters.values())

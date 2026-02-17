@@ -121,7 +121,7 @@ kb completion fish | source
 
 ### Project mode
 
-`kb init --project` creates `.kb.toml` in the current directory (found by walking up from cwd, like `.gitignore`). Database and sources are relative to the config file. Project config takes precedence over global when both exist.
+`kb init --project` creates `.kb.toml` in the current directory (found by walking up from cwd, like `.gitignore`) and a `.kb/` directory with `.gitignore` for the database. Database lives at `.kb/kb.db`; sources are relative to the config file. Project config takes precedence over global when both exist.
 
 ### Config format
 

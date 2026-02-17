@@ -31,7 +31,7 @@ uv tool install "kb[all] @ git+https://github.com/ariel-frischer/kb.git"  # inst
 Two modes — global (default) and project-local:
 
 - **Global**: config at `~/.config/kb/config.toml`, DB at `~/.local/share/kb/kb.db`. Sources are absolute paths. `kb init` creates global config.
-- **Project**: config at `.kb.toml` (walk-up from cwd), DB next to config. Sources are relative paths. `kb init --project` creates project config.
+- **Project**: config at `.kb.toml` (walk-up from cwd), DB at `.kb/kb.db`. Sources are relative paths. `kb init --project` creates project config + `.kb/.gitignore`.
 
 Project `.kb.toml` takes precedence over global config when both exist. Config walk-up works like `.gitignore` — `kb` works from any subdirectory.
 

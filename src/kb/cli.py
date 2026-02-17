@@ -95,6 +95,10 @@ def cmd_init(project: bool):
             sys.exit(1)
         cfg_path.write_text(PROJECT_CONFIG_TEMPLATE)
         print(f"Created {cfg_path}")
+        kb_dir = Path.cwd() / ".kb"
+        kb_dir.mkdir(exist_ok=True)
+        (kb_dir / ".gitignore").write_text("*\n")
+        print(f"Created {kb_dir}/.gitignore")
         print("Edit 'sources' to add directories to index, then run: kb index")
     else:
         if GLOBAL_CONFIG_FILE.exists():

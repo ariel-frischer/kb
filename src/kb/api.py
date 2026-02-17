@@ -11,7 +11,12 @@ from .config import Config
 from .db import connect
 from .embed import deserialize_f32, embed_batch, serialize_f32
 from .expand import expand_query
-from .filters import apply_filters, has_active_filters, parse_filters
+from .filters import (
+    apply_filters,
+    get_tag_chunk_count,
+    has_active_filters,
+    parse_filters,
+)
 from .hyde import generate_hyde_passage
 from .rerank import rerank
 from .search import (
@@ -88,6 +93,41 @@ def _require_index(cfg: Config) -> None:
         raise NoIndexError("No index found. Run 'kb index' first.")
 
 
+def _pick_best_vec(
+    conn: sqlite3.Connection,
+    client: OpenAI,
+    query: str,
+    hyde_passage: str | None,
+    retrieve_k: int,
+    cfg: Config,
+) -> tuple[list[tuple], float]:
+    """Embed query (and optionally HyDE passage), run vec queries, return best results + embed_ms.
+
+    When hyde_passage is provided, embeds both in a single batch API call,
+    runs two vec queries, and returns whichever has better top-1 similarity.
+    HyDE can only help, never hurt.
+    """
+    texts = [query]
+    if hyde_passage:
+        texts.append(hyde_passage)
+
+    t0 = time.time()
+    embeddings = embed_batch(client, texts, cfg)
+    embed_ms = (time.time() - t0) * 1000
+
+    query_vec = run_vec_query(conn, serialize_f32(embeddings[0]), retrieve_k)
+
+    if hyde_passage and len(embeddings) > 1:
+        hyde_vec = run_vec_query(conn, serialize_f32(embeddings[1]), retrieve_k)
+        # Pick whichever has better top-1 similarity (lower distance = better)
+        query_best = query_vec[0][1] if query_vec else float("inf")
+        hyde_best = hyde_vec[0][1] if hyde_vec else float("inf")
+        if hyde_best < query_best:
+            return hyde_vec, embed_ms
+
+    return query_vec, embed_ms
+
+
 # ---------------------------------------------------------------------------
 # Core functions — return dicts, never print or sys.exit
 # ---------------------------------------------------------------------------
@@ -115,33 +155,40 @@ def search_core(
     hyde_ms = 0.0
     expand_ms = 0.0
     expansions: list[dict] = []
-    embed_input = clean_query
     if cfg.hyde_enabled:
         hyde_passage, hyde_ms = generate_hyde_passage(clean_query, client, cfg)
-        if hyde_passage:
-            embed_input = hyde_passage
 
     has_threshold = cfg.search_threshold > 0
     retrieve_k = (top_k * 5) if has_filters else (top_k * 3)
+
+    # Over-fetch when tag filter is active to cover all tagged doc chunks
+    if filters.get("tags"):
+        tagged_chunks = get_tag_chunk_count(filters, conn)
+        retrieve_k = max(retrieve_k, tagged_chunks + top_k * 3)
 
     if cfg.query_expand:
         expansions, expand_ms = expand_query(client, clean_query, cfg)
         lex_exps = [e for e in expansions if e["type"] == "lex"]
         vec_exps = [e for e in expansions if e["type"] == "vec"]
 
-        # Batch embed: primary + all vec expansions (single API call)
+        # Best-of-two vec: embed query + HyDE, pick better result set
         t0 = time.time()
-        all_vec_texts = [embed_input] + [e["text"] for e in vec_exps]
-        all_embeddings = embed_batch(client, all_vec_texts, cfg)
-        embed_ms = (time.time() - t0) * 1000
+        primary_vec, embed_ms = _pick_best_vec(
+            conn, client, clean_query, hyde_passage, retrieve_k, cfg
+        )
 
-        # Run all queries
+        # Batch embed vec expansions (separate call)
+        if vec_exps:
+            exp_embeddings = embed_batch(client, [e["text"] for e in vec_exps], cfg)
+            embed_ms += (time.time() - t0) * 1000 - embed_ms
+            exp_vec = [
+                run_vec_query(conn, serialize_f32(emb), retrieve_k)
+                for emb in exp_embeddings
+            ]
+        else:
+            exp_vec = []
+
         t0 = time.time()
-        primary_vec = run_vec_query(conn, serialize_f32(all_embeddings[0]), retrieve_k)
-        exp_vec = [
-            run_vec_query(conn, serialize_f32(emb), retrieve_k)
-            for emb in all_embeddings[1:]
-        ]
         vec_ms = (time.time() - t0) * 1000
 
         t0 = time.time()
@@ -161,34 +208,16 @@ def search_core(
         fuse_k = retrieve_k if has_filters else top_k
         results = multi_rrf_fuse(all_lists, weights, fuse_k, cfg.rrf_k)
         fill_fts_only_results(conn, results)
+        fused_count = len(results)
 
         vec_count = len(primary_vec)
         fts_count = len(primary_fts)
     else:
         t0 = time.time()
-        resp = client.embeddings.create(
-            model=cfg.embed_model, input=[embed_input], dimensions=cfg.embed_dims
+        vec_results, embed_ms = _pick_best_vec(
+            conn, client, clean_query, hyde_passage, retrieve_k, cfg
         )
-        query_emb = resp.data[0].embedding
-        embed_ms = (time.time() - t0) * 1000
-
-        t0 = time.time()
-        vec_rows = conn.execute(
-            "SELECT chunk_id, distance, chunk_text, doc_path, heading "
-            "FROM vec_chunks WHERE embedding MATCH ? AND k = ? ORDER BY distance",
-            (serialize_f32(query_emb), retrieve_k),
-        ).fetchall()
-        vec_results = [
-            (
-                r["chunk_id"],
-                r["distance"],
-                r["chunk_text"],
-                r["doc_path"],
-                r["heading"],
-            )
-            for r in vec_rows
-        ]
-        vec_ms = (time.time() - t0) * 1000
+        vec_ms = (time.time() - t0) * 1000 - embed_ms
 
         t0 = time.time()
         fts_q = fts_escape(clean_query)
@@ -207,6 +236,7 @@ def search_core(
         fuse_k = retrieve_k if has_filters else top_k
         results = rrf_fuse(vec_results, fts_results, fuse_k, cfg)
         fill_fts_only_results(conn, results)
+        fused_count = len(results)
 
         vec_count = len(vec_results)
         fts_count = len(fts_results)
@@ -241,7 +271,8 @@ def search_core(
         "candidates": {
             "vec": vec_count,
             "fts": fts_count,
-            "fused": len(results),
+            "fused": fused_count,
+            **({"after_filters": len(results)} if has_filters else {}),
         },
         "results": [
             {
@@ -353,22 +384,30 @@ def ask_core(
     clean_question, filters = parse_filters(question)
     has_filters = has_active_filters(filters)
 
-    # BM25 shortcut
+    # BM25 shortcut — deduplicate by document before checking gap
     bm25_shortcut = False
     fts_q = fts_escape(clean_question)
     if fts_q and not has_filters:
         try:
             probe = conn.execute(
-                "SELECT rowid, rank FROM fts_chunks WHERE fts_chunks MATCH ? ORDER BY rank LIMIT 2",
+                "SELECT rowid, rank FROM fts_chunks WHERE fts_chunks MATCH ? ORDER BY rank LIMIT 20",
                 (fts_q,),
             ).fetchall()
             if probe:
-                top_norm = abs(probe[0]["rank"]) / (1.0 + abs(probe[0]["rank"]))
-                second_norm = (
-                    abs(probe[1]["rank"]) / (1.0 + abs(probe[1]["rank"]))
-                    if len(probe) > 1
-                    else 0.0
-                )
+                # Group by doc_path, keep best norm per doc
+                best_per_doc: dict[str, float] = {}
+                for row in probe:
+                    chunk_row = conn.execute(
+                        "SELECT doc_path FROM chunks WHERE id = ?", (row["rowid"],)
+                    ).fetchone()
+                    doc_path = chunk_row["doc_path"] if chunk_row else str(row["rowid"])
+                    abs_rank = abs(row["rank"])
+                    norm = abs_rank / (1.0 + abs_rank)
+                    if doc_path not in best_per_doc or norm > best_per_doc[doc_path]:
+                        best_per_doc[doc_path] = norm
+                doc_norms = sorted(best_per_doc.values(), reverse=True)
+                top_norm = doc_norms[0]
+                second_norm = doc_norms[1] if len(doc_norms) > 1 else 0.0
                 if top_norm >= 0.85 and (top_norm - second_norm) >= 0.15:
                     bm25_shortcut = True
         except sqlite3.OperationalError:
@@ -409,35 +448,41 @@ def ask_core(
             )
         fill_fts_only_results(conn, results)
     else:
-        embed_input = clean_question
+        hyde_passage = None
         if cfg.hyde_enabled:
             hyde_passage, hyde_ms = generate_hyde_passage(clean_question, client, cfg)
-            if hyde_passage:
-                embed_input = hyde_passage
 
         retrieve_k = max(cfg.rerank_fetch_k, top_k * 3)
+
+        # Over-fetch when tag filter is active
+        if filters.get("tags"):
+            tagged_chunks = get_tag_chunk_count(filters, conn)
+            retrieve_k = max(retrieve_k, tagged_chunks + top_k * 3)
 
         if cfg.query_expand:
             expansions, expand_ms = expand_query(client, clean_question, cfg)
             lex_exps = [e for e in expansions if e["type"] == "lex"]
             vec_exps = [e for e in expansions if e["type"] == "vec"]
 
+            # Best-of-two vec: embed query + HyDE, pick better result set
             t0 = time.time()
-            all_vec_texts = [embed_input] + [e["text"] for e in vec_exps]
-            all_embeddings = embed_batch(client, all_vec_texts, cfg)
-            embed_ms = (time.time() - t0) * 1000
-
-            t0 = time.time()
-            primary_vec = run_vec_query(
-                conn, serialize_f32(all_embeddings[0]), retrieve_k
+            primary_vec, embed_ms = _pick_best_vec(
+                conn, client, clean_question, hyde_passage, retrieve_k, cfg
             )
-            exp_vec = [
-                run_vec_query(conn, serialize_f32(emb), retrieve_k)
-                for emb in all_embeddings[1:]
-            ]
+
+            # Batch embed vec expansions
+            if vec_exps:
+                exp_embeddings = embed_batch(client, [e["text"] for e in vec_exps], cfg)
+                exp_vec = [
+                    run_vec_query(conn, serialize_f32(emb), retrieve_k)
+                    for emb in exp_embeddings
+                ]
+            else:
+                exp_vec = []
+
             primary_fts = run_fts_query(conn, clean_question, retrieve_k)
             exp_fts = [run_fts_query(conn, e["text"], retrieve_k) for e in lex_exps]
-            search_ms = (time.time() - t0) * 1000
+            search_ms = (time.time() - t0) * 1000 - embed_ms
 
             all_lists = [
                 normalize_vec_list(primary_vec),
@@ -449,32 +494,12 @@ def ask_core(
 
             results = multi_rrf_fuse(all_lists, weights, cfg.rerank_fetch_k, cfg.rrf_k)
             fill_fts_only_results(conn, results)
+            fused_count = len(results)
         else:
             t0 = time.time()
-            resp = client.embeddings.create(
-                model=cfg.embed_model,
-                input=[embed_input],
-                dimensions=cfg.embed_dims,
+            vec_results, embed_ms = _pick_best_vec(
+                conn, client, clean_question, hyde_passage, retrieve_k, cfg
             )
-            query_emb = resp.data[0].embedding
-            embed_ms = (time.time() - t0) * 1000
-
-            t0 = time.time()
-            vec_rows = conn.execute(
-                "SELECT chunk_id, distance, chunk_text, doc_path, heading "
-                "FROM vec_chunks WHERE embedding MATCH ? AND k = ? ORDER BY distance",
-                (serialize_f32(query_emb), retrieve_k),
-            ).fetchall()
-            vec_results = [
-                (
-                    r["chunk_id"],
-                    r["distance"],
-                    r["chunk_text"],
-                    r["doc_path"],
-                    r["heading"],
-                )
-                for r in vec_rows
-            ]
 
             fts_results_ask: list[tuple] = []
             if fts_q:
@@ -486,10 +511,11 @@ def ask_core(
                     fts_results_ask = [(r["rowid"], r["rank"]) for r in fts_rows]
                 except sqlite3.OperationalError:
                     pass
-            search_ms = (time.time() - t0) * 1000
+            search_ms = (time.time() - t0) * 1000 - embed_ms
 
             results = rrf_fuse(vec_results, fts_results_ask, cfg.rerank_fetch_k, cfg)
             fill_fts_only_results(conn, results)
+            fused_count = len(results)
 
         if has_filters:
             results = apply_filters(results, filters, conn)
@@ -603,7 +629,7 @@ def ask_core(
             {"rank": i + 1, "doc_path": path, "heading": heading}
             for i, (path, heading) in enumerate(source_entries)
         ],
-        "result_count": len(results),
+        "result_count": fused_count if not bm25_shortcut else len(results),
         "filtered_count": len(filtered),
     }
     if cfg.query_expand:

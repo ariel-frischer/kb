@@ -3,7 +3,12 @@
 import sqlite3
 
 
-from kb.filters import apply_filters, has_active_filters, parse_filters
+from kb.filters import (
+    apply_filters,
+    get_tag_chunk_count,
+    has_active_filters,
+    parse_filters,
+)
 
 
 class TestParseFilters:
@@ -216,4 +221,60 @@ class TestApplyFilters:
         result = apply_filters(results, filters, conn)
         assert len(result) == 1
         assert result[0]["doc_path"] == "new.md"
+        conn.close()
+
+
+class TestGetTagChunkCount:
+    def test_no_tags_returns_zero(self, tmp_path):
+        _, filters = parse_filters("plain query")
+        db_path = tmp_path / "test.db"
+        conn = sqlite3.connect(str(db_path))
+        conn.row_factory = sqlite3.Row
+        assert get_tag_chunk_count(filters, conn) == 0
+        conn.close()
+
+    def test_counts_chunks_of_matching_docs(self, tmp_path):
+        db_path = tmp_path / "test.db"
+        conn = sqlite3.connect(str(db_path))
+        conn.row_factory = sqlite3.Row
+        conn.execute(
+            "CREATE TABLE documents (id INTEGER PRIMARY KEY, path TEXT, tags TEXT)"
+        )
+        conn.execute(
+            "CREATE TABLE chunks (id INTEGER PRIMARY KEY, doc_id INTEGER, text TEXT)"
+        )
+        conn.execute("INSERT INTO documents VALUES (1, 'a.md', 'python,tutorial')")
+        conn.execute("INSERT INTO documents VALUES (2, 'b.md', 'rust')")
+        # Doc 1 has 3 chunks, doc 2 has 1 chunk
+        conn.execute("INSERT INTO chunks VALUES (1, 1, 'chunk1')")
+        conn.execute("INSERT INTO chunks VALUES (2, 1, 'chunk2')")
+        conn.execute("INSERT INTO chunks VALUES (3, 1, 'chunk3')")
+        conn.execute("INSERT INTO chunks VALUES (4, 2, 'chunk4')")
+        conn.commit()
+
+        _, filters = parse_filters("tag:python query")
+        count = get_tag_chunk_count(filters, conn)
+        assert count == 3  # only chunks from doc with python tag
+        conn.close()
+
+    def test_multiple_tags_intersection(self, tmp_path):
+        db_path = tmp_path / "test.db"
+        conn = sqlite3.connect(str(db_path))
+        conn.row_factory = sqlite3.Row
+        conn.execute(
+            "CREATE TABLE documents (id INTEGER PRIMARY KEY, path TEXT, tags TEXT)"
+        )
+        conn.execute(
+            "CREATE TABLE chunks (id INTEGER PRIMARY KEY, doc_id INTEGER, text TEXT)"
+        )
+        conn.execute("INSERT INTO documents VALUES (1, 'a.md', 'python,tutorial')")
+        conn.execute("INSERT INTO documents VALUES (2, 'b.md', 'python')")
+        conn.execute("INSERT INTO chunks VALUES (1, 1, 'chunk1')")
+        conn.execute("INSERT INTO chunks VALUES (2, 1, 'chunk2')")
+        conn.execute("INSERT INTO chunks VALUES (3, 2, 'chunk3')")
+        conn.commit()
+
+        _, filters = parse_filters("tag:python tag:tutorial query")
+        count = get_tag_chunk_count(filters, conn)
+        assert count == 2  # only doc 1 has both tags
         conn.close()

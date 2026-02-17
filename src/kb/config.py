@@ -7,7 +7,7 @@ from pathlib import Path
 
 PROJECT_CONFIG_FILE = ".kb.toml"
 SECRETS_PATH = Path.home() / ".config" / "kb" / "secrets.toml"
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 GLOBAL_CONFIG_DIR = Path.home() / ".config" / "kb"
 GLOBAL_CONFIG_FILE = GLOBAL_CONFIG_DIR / "config.toml"
@@ -19,7 +19,7 @@ PROJECT_CONFIG_TEMPLATE = """\
 # Run `kb init --project` to generate, `kb index` to index sources.
 
 # Where to store the database (relative to this file)
-db = "kb.db"
+db = ".kb/kb.db"
 
 # Directories to index (relative to this file)
 sources = [
@@ -109,7 +109,7 @@ CONFIG_TEMPLATE = PROJECT_CONFIG_TEMPLATE
 
 @dataclass
 class Config:
-    db: str = "kb.db"
+    db: str = ".kb/kb.db"
     sources: list[str] = field(default_factory=list)
     embed_model: str = "text-embedding-3-small"
     embed_dims: int = 1536
@@ -139,7 +139,7 @@ class Config:
     # Resolved paths (set by find_config)
     config_dir: Path | None = None
     config_path: Path | None = None
-    db_path: Path = field(default_factory=lambda: Path("kb.db"))
+    db_path: Path = field(default_factory=lambda: Path(".kb/kb.db"))
 
     @property
     def source_paths(self) -> list[Path]:

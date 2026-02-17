@@ -52,11 +52,15 @@ def _get_local_model(model_name: str):
                 "Install with: pip install 'kb[local-llm]' or pip install transformers torch"
             )
         device = _get_device()
-        dtype = torch.bfloat16 if device != "cpu" and torch.cuda.is_bf16_supported() else torch.float32
+        dtype = (
+            torch.bfloat16
+            if device != "cpu" and torch.cuda.is_bf16_supported()
+            else torch.float32
+        )
         tokenizer = AutoTokenizer.from_pretrained(model_name)
-        model = AutoModelForCausalLM.from_pretrained(
-            model_name, torch_dtype=dtype
-        ).to(device)
+        model = AutoModelForCausalLM.from_pretrained(model_name, torch_dtype=dtype).to(
+            device
+        )
         model.eval()
         _hyde_model_cache[model_name] = (tokenizer, model, device)
     return _hyde_model_cache[model_name]

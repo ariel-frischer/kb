@@ -330,8 +330,9 @@ def cmd_search(
         print(f"Filters: {', '.join(f'{k}={v}' for k, v in result['filters'].items())}")
 
     print(f'Query: "{clean_query}"')
+    hyde_tag = f"HyDE: {timing['hyde']}ms | " if timing.get("hyde") else ""
     print(
-        f"Embed: {timing['embed']}ms | Vec: {timing['vec']}ms | FTS: {timing['fts']}ms"
+        f"{hyde_tag}Embed: {timing['embed']}ms | Vec: {timing['vec']}ms | FTS: {timing['fts']}ms"
     )
     print(
         f"Candidates: {candidates['vec']} vec, {candidates['fts']} fts -> {candidates['fused']} fused\n"

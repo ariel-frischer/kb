@@ -11,6 +11,7 @@ from .config import Config
 from .db import connect
 from .embed import deserialize_f32, serialize_f32
 from .filters import apply_filters, has_active_filters, parse_filters
+from .hyde import generate_hyde_passage
 from .rerank import rerank
 from .search import fill_fts_only_results, fts_escape, rrf_fuse
 
@@ -100,9 +101,17 @@ def search_core(
     clean_query, filters = parse_filters(query)
     has_filters = has_active_filters(filters)
 
+    hyde_passage = None
+    hyde_ms = 0.0
+    embed_input = clean_query
+    if cfg.hyde_enabled:
+        hyde_passage, hyde_ms = generate_hyde_passage(clean_query, client, cfg)
+        if hyde_passage:
+            embed_input = hyde_passage
+
     t0 = time.time()
     resp = client.embeddings.create(
-        model=cfg.embed_model, input=[clean_query], dimensions=cfg.embed_dims
+        model=cfg.embed_model, input=[embed_input], dimensions=cfg.embed_dims
     )
     query_emb = resp.data[0].embedding
     embed_ms = (time.time() - t0) * 1000
@@ -158,6 +167,7 @@ def search_core(
         "query": clean_query,
         "filters": {k: v for k, v in filters.items() if v} if has_filters else {},
         "timing_ms": {
+            "hyde": round(hyde_ms),
             "embed": round(embed_ms),
             "vec": round(vec_ms),
             "fts": round(fts_ms),
@@ -295,6 +305,7 @@ def ask_core(
             pass
 
     rerank_info = None
+    hyde_ms = 0.0
 
     if bm25_shortcut:
         t0 = time.time()
@@ -326,9 +337,17 @@ def ask_core(
             )
         fill_fts_only_results(conn, results)
     else:
+        embed_input = clean_question
+        if cfg.hyde_enabled:
+            hyde_passage, hyde_ms = generate_hyde_passage(
+                clean_question, client, cfg
+            )
+            if hyde_passage:
+                embed_input = hyde_passage
+
         t0 = time.time()
         resp = client.embeddings.create(
-            model=cfg.embed_model, input=[clean_question], dimensions=cfg.embed_dims
+            model=cfg.embed_model, input=[embed_input], dimensions=cfg.embed_dims
         )
         query_emb = resp.data[0].embedding
         embed_ms = (time.time() - t0) * 1000
@@ -388,6 +407,7 @@ def ask_core(
             "bm25_shortcut": bm25_shortcut,
             "rerank": rerank_info,
             "timing_ms": {
+                "hyde": round(hyde_ms),
                 "embed": round(embed_ms),
                 "search": round(search_ms),
                 "generate": 0,
@@ -457,6 +477,7 @@ def ask_core(
         "bm25_shortcut": bm25_shortcut,
         "rerank": rerank_info,
         "timing_ms": {
+            "hyde": round(hyde_ms),
             "embed": round(embed_ms),
             "search": round(search_ms),
             "generate": round(gen_ms),

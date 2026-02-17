@@ -736,6 +736,18 @@ def main():
         sys.exit(0)
 
     if cmd == "mcp":
+        if len(args) > 1 and args[1] in ("-h", "--help"):
+            print("Usage: kb mcp")
+            print()
+            print("Start the MCP (Model Context Protocol) server over stdio.")
+            print("Used by Claude Desktop, Claude Code, and other MCP clients.")
+            print()
+            print("Claude Desktop config:")
+            print('  {"mcpServers": {"kb": {"command": "kb-mcp"}}}')
+            print()
+            print("Claude Code:")
+            print("  claude mcp add kb kb-mcp")
+            sys.exit(0)
         from .mcp_server import main as mcp_main
 
         mcp_main()

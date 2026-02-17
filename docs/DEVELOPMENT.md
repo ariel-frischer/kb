@@ -31,16 +31,18 @@ uv run kb --help        # run locally
 
 ```
 src/kb/
-├── cli.py       — Entry point, command dispatch (init, index, search, ask, similar, tag/untag/tags, list, stats, reset, completion)
-├── config.py    — .kb.toml loading, Config dataclass, secrets.toml loading
-├── db.py        — SQLite schema, sqlite-vec connection, migrations
-├── chunk.py     — Markdown + plain text chunking (chonkie or regex fallback)
-├── embed.py     — OpenAI embedding helpers, batching, serialize/deserialize for sqlite-vec
-├── extract.py   — Text extraction registry for 30+ formats (PDF, DOCX, EPUB, HTML, ODT, etc.)
-├── search.py    — Hybrid search (vector + FTS5), RRF fusion
-├── rerank.py    — LLM reranking (RankGPT pattern)
-├── filters.py   — Pre-search filter parsing + application (file:, type:, tag:, dt>, dt<, +"kw", -"kw")
-└── ingest.py    — File indexing pipeline (unified loop over all supported formats, frontmatter tag parsing)
+├── cli.py         — Entry point, command dispatch, human-readable output (thin wrappers over api.py)
+├── api.py         — Core logic for search/ask/fts/similar/stats/list (returns dicts, no I/O)
+├── mcp_server.py  — MCP server (FastMCP, stdio) exposing kb tools for AI agents
+├── config.py      — .kb.toml loading, Config dataclass, secrets.toml loading
+├── db.py          — SQLite schema, sqlite-vec connection, migrations
+├── chunk.py       — Markdown + plain text chunking (chonkie or regex fallback)
+├── embed.py       — OpenAI embedding helpers, batching, serialize/deserialize for sqlite-vec
+├── extract.py     — Text extraction registry for 30+ formats (PDF, DOCX, EPUB, HTML, ODT, etc.)
+├── search.py      — Hybrid search (vector + FTS5), RRF fusion
+├── rerank.py      — LLM reranking (RankGPT pattern)
+├── filters.py     — Pre-search filter parsing + application (file:, type:, tag:, dt>, dt<, +"kw", -"kw")
+└── ingest.py      — File indexing pipeline (unified loop over all supported formats, frontmatter tag parsing)
 ```
 
 ### Data flow
@@ -67,9 +69,11 @@ src/kb/
 
 ## Adding a new command
 
-1. Add a `cmd_<name>()` function in `cli.py` following the existing pattern (parse args → load config → connect → execute)
-2. Add dispatch in `main()` — before `find_config()` if no config needed (like `completion`), in the `elif` chain otherwise
-3. Add a help line in the `USAGE` string
+1. Add a `<name>_core()` function in `api.py` that returns a dict (no printing, no `sys.exit()`)
+2. Add a `cmd_<name>()` wrapper in `cli.py` that calls the core function and handles output/errors
+3. Add dispatch in `main()` — before `find_config()` if no config needed (like `completion`), in the `elif` chain otherwise
+4. Add a help line in the `USAGE` string
+5. Optionally expose as an MCP tool in `mcp_server.py`
 
 ## Running tests
 

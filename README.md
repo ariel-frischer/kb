@@ -18,6 +18,7 @@ CLI RAG tool for your docs. Index 30+ document formats (markdown, PDF, DOCX, EPU
 - **30+ formats** — markdown, PDF, DOCX, PPTX, XLSX, EPUB, HTML, ODT, ODS, ODP, RTF, email (.eml), subtitles (.srt/.vtt), and plain text variants (.txt, .rst, .org, .csv, .json, .yaml, .tex, etc.)
 - **Optional code indexing** — set `index_code = true` to also index source code files (.py, .js, .ts, .go, .rs, etc.)
 - **Pluggable chunking** — uses [chonkie](https://github.com/bhavnicksm/chonkie) when available, regex fallback otherwise
+- **MCP server** — expose kb as tools for Claude Desktop, Claude Code, and other MCP clients
 
 ## Install
 
@@ -90,6 +91,7 @@ kb tags                        List all tags with document counts
 kb stats                       Show index stats + capabilities
 kb reset                       Drop DB and start fresh
 kb version                     Show version (also: kb v, kb --version)
+kb mcp                         Start MCP server (for Claude Desktop / AI agents)
 kb completion <shell>          Output shell completions (zsh, bash, fish)
 ```
 
@@ -271,6 +273,43 @@ kb ask "question"
   5. Confidence threshold
   6. LLM generates answer from context
 ```
+
+## MCP Server
+
+kb includes an [MCP](https://modelcontextprotocol.io/) server that exposes search and ask as tools for AI agents.
+
+### Setup with Claude Desktop
+
+Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_desktop_config.json` on macOS, `~/.config/Claude/claude_desktop_config.json` on Linux):
+
+```json
+{
+  "mcpServers": {
+    "kb": {
+      "command": "kb-mcp"
+    }
+  }
+}
+```
+
+### Setup with Claude Code
+
+```bash
+claude mcp add kb kb-mcp
+```
+
+### Available tools
+
+| Tool | Description |
+|------|-------------|
+| `kb_search` | Hybrid semantic + keyword search with inline filters |
+| `kb_ask` | Full RAG pipeline: search + rerank + LLM answer |
+| `kb_fts` | Keyword-only search (no API cost) |
+| `kb_similar` | Find similar documents (no API call) |
+| `kb_status` | Index statistics |
+| `kb_list` | List indexed documents |
+
+The MCP server requires the `mcp` extra: `kb[mcp]` or `kb[all]`.
 
 ## Alternatives
 

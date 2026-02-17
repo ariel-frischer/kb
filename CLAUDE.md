@@ -39,14 +39,16 @@ Path resolution: `Config.doc_path_for_db()` computes stored paths — relative t
 
 ## Architecture
 
-- `cli.py` — entry point, command dispatch via `sys.argv` (no argparse). Each `cmd_*` function handles one command.
+- `cli.py` — entry point, command dispatch via `sys.argv` (no argparse). Each `cmd_*` is a thin wrapper that calls the corresponding `_core` function from `api.py` and handles printing/exit.
+- `api.py` — core logic for search/ask/fts/similar/stats/list. Returns plain dicts, never prints or calls `sys.exit()`. Used by both CLI and MCP server. Exception classes: `KBError`, `NoIndexError`, `NoSearchTermsError`, `FileNotIndexedError`.
+- `mcp_server.py` — MCP server (FastMCP, stdio transport) exposing 6 tools: `kb_search`, `kb_ask`, `kb_fts`, `kb_similar`, `kb_status`, `kb_list`. Calls `api.py` core functions. Optional dep (`mcp[cli]`).
 - `config.py` — `Config` dataclass with all tunables, `find_config()` walk-up loader, `save_config()` minimal TOML serializer (only writes non-default values)
 - `extract.py` — text extraction registry. `_register()` maps extensions to `(extractor_fn, doc_type, available, install_hint, is_code)`. Stdlib formats always available; optional deps (pymupdf, python-docx, etc.) probed at import time.
 - `ingest.py` — indexing pipeline: discover files → `.kbignore` filtering → size guard → `extract_text()` → frontmatter tag parsing (markdown) → content-hash diff → chunk → diff chunks by hash → batch embed new → store
 - `db.py` — schema creation + `SCHEMA_VERSION` migration. Tables: `documents` (with `tags` column), `chunks`, `vec_chunks` (vec0 virtual table), `fts_chunks` (FTS5 with porter stemming + trigger-based sync from chunks). WAL mode + foreign keys enabled. v5→v6 rebuilds FTS with porter tokenizer; v4→v5 rebuilds FTS with triggers; v3→v4 uses ALTER TABLE; older versions drop-and-recreate.
 - `chunk.py` — markdown (heading-aware with ancestry tracking) + plain text chunking. Uses chonkie with overlap refinery when available, regex fallback otherwise. `embedding_text()` enriches chunks with file path + heading ancestry before embedding.
 - `search.py` — hybrid search: vector (vec0 MATCH) + FTS5 (AND + prefix matching), fused with score-weighted RRF (vec scaled by similarity, FTS by normalized BM25) with positional rank bonuses. `fill_fts_only_results()` backfills metadata for FTS-only hits.
-- `rerank.py` — RankGPT pattern: presents numbered passages to LLM, parses comma-separated ranking response
+- `rerank.py` — RankGPT pattern: presents numbered passages to LLM, parses comma-separated ranking response. Returns `(results, rerank_info)` tuple.
 - `filters.py` — inline filter syntax (`file:`, `type:`, `tag:`, `dt>`, `dt<`, `+"kw"`, `-"kw"`) parsed from query string, applied post-search
 - `embed.py` — thin OpenAI embedding wrapper, `serialize_f32()` / `deserialize_f32()` for sqlite-vec binary format
 
@@ -72,3 +74,5 @@ Path resolution: `Config.doc_path_for_db()` computes stored paths — relative t
 - **Schema versioning** — `SCHEMA_VERSION` in `meta` table; v5→v6 rebuilds FTS with porter tokenizer; v4→v5 rebuilds FTS with triggers; v3→v4 uses non-destructive ALTER TABLE; older upgrades drop and recreate all tables
 - **JSON output** — `search`, `fts`, and `ask` support `--json` flag for structured output (scripting/agent integration)
 - **Tags** — stored comma-separated in `documents.tags` column; auto-parsed from markdown YAML frontmatter during indexing; manually managed via `kb tag`/`kb untag`
+- **MCP server** — `kb mcp` / `kb-mcp` starts a Model Context Protocol server (stdio transport) exposing search/ask/fts/similar/status/list as tools for Claude Desktop, Claude Code, and other MCP clients. Optional dep: `mcp[cli]` (included in `kb[all]`)
+- **CLI/API split** — `api.py` contains all core logic (returns dicts), `cli.py` is a thin presentation layer. Both CLI and MCP server call the same core functions.

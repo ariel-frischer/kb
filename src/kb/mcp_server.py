@@ -1,5 +1,7 @@
 """MCP server exposing kb search/ask as tools for AI agents."""
 
+import sys
+
 from mcp.server.fastmcp import FastMCP
 
 from .api import (
@@ -106,4 +108,5 @@ def kb_list() -> dict:
 
 
 def main():
+    print("kb MCP server starting (stdio transport)...", file=sys.stderr)
     mcp.run(transport="stdio")

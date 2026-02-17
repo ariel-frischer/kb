@@ -159,7 +159,7 @@ class TestCmdSearch:
 
     def test_basic_search(self, populated_db, capsys):
         client = _mock_openai_client(embed_dims=4)
-        with patch("kb.cli.OpenAI", return_value=client):
+        with patch("kb.api.OpenAI", return_value=client):
             cmd_search("install", populated_db, top_k=5)
 
         out = capsys.readouterr().out
@@ -169,7 +169,7 @@ class TestCmdSearch:
 
     def test_search_with_filter(self, populated_db, capsys):
         client = _mock_openai_client(embed_dims=4)
-        with patch("kb.cli.OpenAI", return_value=client):
+        with patch("kb.api.OpenAI", return_value=client):
             cmd_search('file:docs/*.md +"install" search query', populated_db, top_k=5)
 
         out = capsys.readouterr().out
@@ -177,7 +177,7 @@ class TestCmdSearch:
 
     def test_search_top_k(self, populated_db, capsys):
         client = _mock_openai_client(embed_dims=4)
-        with patch("kb.cli.OpenAI", return_value=client):
+        with patch("kb.api.OpenAI", return_value=client):
             cmd_search("query", populated_db, top_k=1)
 
         out = capsys.readouterr().out
@@ -223,7 +223,7 @@ class TestCmdSearch:
         client = _mock_openai_client(embed_dims=4)
         client.embeddings.create.return_value.data = [MagicMock(embedding=[0.9] * 4)]
 
-        with patch("kb.cli.OpenAI", return_value=client):
+        with patch("kb.api.OpenAI", return_value=client):
             cmd_search("topic", cfg, top_k=5, threshold=0.99)
 
         out = capsys.readouterr().out
@@ -240,14 +240,14 @@ class TestCmdSearch:
         # Use a very far query vector so similarity is low
         client.embeddings.create.return_value.data = [MagicMock(embedding=[0.99] * 4)]
 
-        with patch("kb.cli.OpenAI", return_value=client):
+        with patch("kb.api.OpenAI", return_value=client):
             # threshold=0 (no filter) -> get results
             cmd_search("install", populated_db, top_k=5, threshold=0.0)
 
         out_no_filter = capsys.readouterr().out
         count_no_filter = out_no_filter.count("--- [")
 
-        with patch("kb.cli.OpenAI", return_value=client):
+        with patch("kb.api.OpenAI", return_value=client):
             # threshold=0.99 (strict filter) -> should get fewer results
             cmd_search("install", populated_db, top_k=5, threshold=0.99)
 
@@ -269,7 +269,7 @@ class TestCmdAsk:
 
     def test_basic_ask(self, populated_db, capsys):
         client = _mock_openai_client(embed_dims=4)
-        with patch("kb.cli.OpenAI", return_value=client):
+        with patch("kb.api.OpenAI", return_value=client):
             cmd_ask("How do I install?", populated_db, top_k=5)
 
         out = capsys.readouterr().out
@@ -292,7 +292,7 @@ class TestCmdAsk:
             client.chat.completions.create.return_value,
         ]
 
-        with patch("kb.cli.OpenAI", return_value=client):
+        with patch("kb.api.OpenAI", return_value=client):
             cmd_ask("question", populated_db, top_k=5)
 
         assert client.chat.completions.create.call_count == 2
@@ -333,7 +333,7 @@ class TestCmdAsk:
         client = _mock_openai_client(embed_dims=4)
         client.embeddings.create.return_value.data = [MagicMock(embedding=[0.1] * 4)]
 
-        with patch("kb.cli.OpenAI", return_value=client):
+        with patch("kb.api.OpenAI", return_value=client):
             cmd_ask("question", cfg, top_k=5)
 
         out = capsys.readouterr().out
@@ -341,7 +341,7 @@ class TestCmdAsk:
 
     def test_ask_with_filters(self, populated_db, capsys):
         client = _mock_openai_client(embed_dims=4)
-        with patch("kb.cli.OpenAI", return_value=client):
+        with patch("kb.api.OpenAI", return_value=client):
             cmd_ask('file:docs/*.md +"install" how to install?', populated_db)
 
         out = capsys.readouterr().out
@@ -349,7 +349,7 @@ class TestCmdAsk:
 
     def test_ask_sources_show_numbered_citations(self, populated_db, capsys):
         client = _mock_openai_client(embed_dims=4)
-        with patch("kb.cli.OpenAI", return_value=client):
+        with patch("kb.api.OpenAI", return_value=client):
             cmd_ask("How do I install?", populated_db, top_k=5)
 
         out = capsys.readouterr().out
@@ -360,7 +360,7 @@ class TestCmdAsk:
     def test_ask_sources_show_heading_ancestry(self, populated_db, capsys):
         """Sources footer should display heading ancestry breadcrumbs."""
         client = _mock_openai_client(embed_dims=4)
-        with patch("kb.cli.OpenAI", return_value=client):
+        with patch("kb.api.OpenAI", return_value=client):
             cmd_ask("How do I install?", populated_db, top_k=5)
 
         out = capsys.readouterr().out
@@ -406,7 +406,7 @@ class TestCmdAsk:
         conn.close()
 
         client = _mock_openai_client(embed_dims=4)
-        with patch("kb.cli.OpenAI", return_value=client):
+        with patch("kb.api.OpenAI", return_value=client):
             cmd_ask("question", cfg, top_k=5)
 
         out = capsys.readouterr().out

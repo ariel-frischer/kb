@@ -13,6 +13,8 @@ def connect(cfg: Config) -> sqlite3.Connection:
     cfg.db_path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(cfg.db_path))
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode = WAL")
+    conn.execute("PRAGMA foreign_keys = ON")
     conn.enable_load_extension(True)
     sqlite_vec.load(conn)
 
@@ -21,8 +23,14 @@ def connect(cfg: Config) -> sqlite3.Connection:
     current = int(row[0]) if row else 0
 
     if current < SCHEMA_VERSION:
-        if current == 4:
-            # Non-destructive: rebuild FTS with triggers, data preserved
+        if current == 5:
+            # Non-destructive: rebuild FTS with porter tokenizer
+            print(
+                f"Schema upgrade v{current} -> v{SCHEMA_VERSION}, rebuilding FTS with porter tokenizer..."
+            )
+            conn.execute("DROP TABLE IF EXISTS fts_chunks")
+        elif current == 4:
+            # Non-destructive: rebuild FTS with triggers + porter tokenizer
             print(
                 f"Schema upgrade v{current} -> v{SCHEMA_VERSION}, rebuilding FTS with triggers..."
             )
@@ -88,7 +96,8 @@ def connect(cfg: Config) -> sqlite3.Connection:
             text,
             heading,
             content='chunks',
-            content_rowid='id'
+            content_rowid='id',
+            tokenize='porter unicode61'
         )
     """)
     conn.execute("""

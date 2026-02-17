@@ -2,13 +2,21 @@
 
 import json
 import re
-import sqlite3
 import sys
-import time
 from pathlib import Path
 
-from openai import OpenAI
-
+from .api import (
+    FileNotIndexedError,
+    NoIndexError,
+    NoSearchTermsError,
+    _resolve_doc_path,
+    ask_core,
+    fts_core,
+    list_core,
+    search_core,
+    similar_core,
+    stats_core,
+)
 from .chunk import CHONKIE_AVAILABLE
 from .config import (
     GLOBAL_CONFIG_DIR,
@@ -23,12 +31,8 @@ from .config import (
     save_config,
 )
 from .db import connect, reset
-from .embed import deserialize_f32, serialize_f32
-from .filters import apply_filters, has_active_filters, parse_filters
 from .extract import supported_extensions, unavailable_formats
 from .ingest import index_directory
-from .rerank import llm_rerank
-from .search import fill_fts_only_results, fts_escape, rrf_fuse
 
 USAGE = """\
 kb — CLI knowledge base powered by sqlite-vec
@@ -55,6 +59,7 @@ Usage:
   kb stats                       Show index statistics and supported formats
   kb reset                       Drop database and start fresh
   kb version                      Show version (also: kb v, kb --version)
+  kb mcp                         Start MCP server (for Claude Desktop / AI agents)
   kb completion <shell>           Output shell completions (zsh, bash, fish)
 
 Search filters (inline with query):
@@ -228,7 +233,6 @@ def _best_snippet(text: str, query: str, width: int = 500) -> str:
     if not words:
         return text[:width]
     lower = text.lower()
-    # Find all positions of query term matches
     positions = []
     for w in words:
         idx = lower.find(w)
@@ -236,11 +240,10 @@ def _best_snippet(text: str, query: str, width: int = 500) -> str:
             positions.append(idx)
     if not positions:
         return text[:width]
-    # Center the window on the middle of matched term positions
     center = sum(positions) // len(positions)
     start = max(0, center - width // 2)
     end = min(len(text), start + width)
-    start = max(0, end - width)  # adjust if we hit the end
+    start = max(0, end - width)
     prefix = "..." if start > 0 else ""
     suffix = "..." if end < len(text) else ""
     return prefix + text[start:end] + suffix
@@ -253,124 +256,38 @@ def cmd_search(
     threshold: float | None = None,
     json_output: bool = False,
 ):
-    if threshold is not None:
-        cfg.search_threshold = threshold
-    if not cfg.db_path.exists():
-        print("No index found. Run 'kb index' first.")
+    try:
+        result = search_core(query, cfg, top_k, threshold)
+    except NoIndexError as e:
+        print(str(e))
         sys.exit(1)
 
-    conn = connect(cfg)
-    client = OpenAI()
-
-    clean_query, filters = parse_filters(query)
-    has_filters = has_active_filters(filters)
-
-    if not json_output and has_filters:
-        print(f"Filters: {', '.join(f'{k}={v}' for k, v in filters.items() if v)}")
-
-    t0 = time.time()
-    resp = client.embeddings.create(
-        model=cfg.embed_model, input=[clean_query], dimensions=cfg.embed_dims
-    )
-    query_emb = resp.data[0].embedding
-    embed_ms = (time.time() - t0) * 1000
-
-    has_threshold = cfg.search_threshold > 0
-    retrieve_k = (top_k * 5) if has_filters else (top_k * 3)
-
-    t0 = time.time()
-    vec_rows = conn.execute(
-        "SELECT chunk_id, distance, chunk_text, doc_path, heading "
-        "FROM vec_chunks WHERE embedding MATCH ? AND k = ? ORDER BY distance",
-        (serialize_f32(query_emb), retrieve_k),
-    ).fetchall()
-    vec_results = [
-        (r["chunk_id"], r["distance"], r["chunk_text"], r["doc_path"], r["heading"])
-        for r in vec_rows
-    ]
-    vec_ms = (time.time() - t0) * 1000
-
-    t0 = time.time()
-    fts_q = fts_escape(clean_query)
-    fts_results = []
-    if fts_q:
-        try:
-            fts_rows = conn.execute(
-                "SELECT rowid, rank FROM fts_chunks WHERE fts_chunks MATCH ? ORDER BY rank LIMIT ?",
-                (fts_q, retrieve_k),
-            ).fetchall()
-            fts_results = [(r["rowid"], r["rank"]) for r in fts_rows]
-        except sqlite3.OperationalError:
-            pass
-    fts_ms = (time.time() - t0) * 1000
-
-    fuse_k = retrieve_k if has_filters else top_k
-    results = rrf_fuse(vec_results, fts_results, fuse_k, cfg)
-    fill_fts_only_results(conn, results)
-
-    if has_filters:
-        results = apply_filters(results, filters, conn)
-
-    results = results[:top_k]
-
-    if has_threshold:
-        results = [
-            r
-            for r in results
-            if r["similarity"] is None or r["similarity"] >= cfg.search_threshold
-        ]
-
-    conn.close()
-
     if json_output:
-        out = {
-            "query": clean_query,
-            "timing_ms": {
-                "embed": round(embed_ms),
-                "vec": round(vec_ms),
-                "fts": round(fts_ms),
-            },
-            "candidates": {
-                "vec": len(vec_results),
-                "fts": len(fts_results),
-                "fused": len(results),
-            },
-            "results": [
-                {
-                    "rank": i + 1,
-                    "doc_path": r["doc_path"],
-                    "heading": r["heading"],
-                    "similarity": r["similarity"],
-                    "fts_rank": r.get("fts_rank"),
-                    "rrf_score": round(r["rrf_score"], 6),
-                    "sources": [s for s in ["vec", "fts"] if r[f"in_{s}"]],
-                    "text": r["text"],
-                }
-                for i, r in enumerate(results)
-            ],
-        }
-        print(json.dumps(out, ensure_ascii=False))
+        print(json.dumps(result, ensure_ascii=False))
         return
 
+    clean_query = result["query"]
+    timing = result["timing_ms"]
+    candidates = result["candidates"]
+
+    if result.get("filters"):
+        print(f"Filters: {', '.join(f'{k}={v}' for k, v in result['filters'].items())}")
+
     print(f'Query: "{clean_query}"')
-    print(f"Embed: {embed_ms:.0f}ms | Vec: {vec_ms:.1f}ms | FTS: {fts_ms:.1f}ms")
     print(
-        f"Candidates: {len(vec_results)} vec, {len(fts_results)} fts -> {len(results)} fused\n"
+        f"Embed: {timing['embed']}ms | Vec: {timing['vec']}ms | FTS: {timing['fts']}ms"
+    )
+    print(
+        f"Candidates: {candidates['vec']} vec, {candidates['fts']} fts -> {candidates['fused']} fused\n"
     )
 
-    for i, r in enumerate(results):
+    for r in result["results"]:
         sim = (
             f"sim:{r['similarity']:.3f}" if r["similarity"] is not None else "fts-only"
         )
-        sources = []
-        if r["in_vec"]:
-            sources.append("vec")
-        if r["in_fts"]:
-            sources.append("fts")
-        source_tag = "+".join(sources)
-
+        source_tag = "+".join(r["sources"])
         print(
-            f"--- [{i + 1}] {r['doc_path']} ({sim}, {source_tag}, rrf:{r['rrf_score']:.4f}) ---"
+            f"--- [{r['rank']}] {r['doc_path']} ({sim}, {source_tag}, rrf:{r['rrf_score']:.4f}) ---"
         )
         if r["heading"]:
             print(f"    Section: {r['heading']}")
@@ -388,87 +305,31 @@ def cmd_fts(
     json_output: bool = False,
 ):
     """FTS-only keyword search — no embedding, no API cost."""
-    if not cfg.db_path.exists():
-        print("No index found. Run 'kb index' first.")
-        sys.exit(1)
-
-    conn = connect(cfg)
-
-    clean_query, filters = parse_filters(query)
-    has_filters = has_active_filters(filters)
-
-    if not json_output and has_filters:
-        print(f"Filters: {', '.join(f'{k}={v}' for k, v in filters.items() if v)}")
-
-    fts_q = fts_escape(clean_query)
-    if not fts_q:
-        print("No searchable terms in query.")
-        conn.close()
-        sys.exit(1)
-
-    t0 = time.time()
     try:
-        fts_rows = conn.execute(
-            "SELECT rowid, rank FROM fts_chunks WHERE fts_chunks MATCH ? ORDER BY rank LIMIT ?",
-            (fts_q, top_k * 5 if has_filters else top_k),
-        ).fetchall()
-    except sqlite3.OperationalError:
-        print("FTS index not available. Re-run 'kb index'.")
-        conn.close()
+        result = fts_core(query, cfg, top_k)
+    except NoIndexError as e:
+        print(str(e))
         sys.exit(1)
-    fts_ms = (time.time() - t0) * 1000
-
-    results = []
-    for chunk_id, fts_rank in [(r["rowid"], r["rank"]) for r in fts_rows]:
-        abs_rank = abs(fts_rank)
-        norm_bm25 = abs_rank / (1.0 + abs_rank)
-        results.append(
-            {
-                "chunk_id": chunk_id,
-                "rrf_score": norm_bm25,
-                "distance": None,
-                "similarity": None,
-                "fts_rank": fts_rank,
-                "text": None,
-                "doc_path": None,
-                "heading": None,
-                "in_fts": True,
-                "in_vec": False,
-            }
-        )
-    fill_fts_only_results(conn, results)
-
-    if has_filters:
-        results = apply_filters(results, filters, conn)
-
-    results = results[:top_k]
-    conn.close()
+    except NoSearchTermsError as e:
+        print(str(e))
+        sys.exit(1)
 
     if json_output:
-        out = {
-            "query": clean_query,
-            "timing_ms": {"fts": round(fts_ms)},
-            "results": [
-                {
-                    "rank": i + 1,
-                    "doc_path": r["doc_path"],
-                    "heading": r["heading"],
-                    "bm25": round(r["rrf_score"], 4),
-                    "fts_rank": r["fts_rank"],
-                    "text": r["text"],
-                }
-                for i, r in enumerate(results)
-            ],
-        }
-        print(json.dumps(out, ensure_ascii=False))
+        print(json.dumps(result, ensure_ascii=False))
         return
 
-    print(f'Query: "{clean_query}"')
-    print(f"FTS: {fts_ms:.1f}ms | {len(results)} results\n")
+    clean_query = result["query"]
+    fts_ms = result["timing_ms"]["fts"]
 
-    for i, r in enumerate(results):
-        bm25_str = f"bm25:{r['rrf_score']:.3f}"
-        print(f"--- [{i + 1}] {r['doc_path']} ({bm25_str}) ---")
+    if result.get("filters"):
+        print(f"Filters: {', '.join(f'{k}={v}' for k, v in result['filters'].items())}")
+
+    print(f'Query: "{clean_query}"')
+    print(f"FTS: {fts_ms}ms | {len(result['results'])} results\n")
+
+    for r in result["results"]:
+        bm25_str = f"bm25:{r['bm25']:.3f}"
+        print(f"--- [{r['rank']}] {r['doc_path']} ({bm25_str}) ---")
         if r["heading"]:
             print(f"    Section: {r['heading']}")
         preview = _best_snippet(r["text"] or "", clean_query).replace("\n", "\n    ")
@@ -486,362 +347,88 @@ def cmd_ask(
     json_output: bool = False,
 ):
     """Full RAG: hybrid retrieve -> filter -> LLM rerank -> confidence filter -> answer."""
-    if threshold is not None:
-        cfg.ask_threshold = threshold
-    if not cfg.db_path.exists():
-        print("No index found. Run 'kb index' first.")
+    try:
+        result = ask_core(question, cfg, top_k, threshold)
+    except NoIndexError as e:
+        print(str(e))
         sys.exit(1)
-
-    conn = connect(cfg)
-    client = OpenAI()
-
-    clean_question, filters = parse_filters(question)
-    has_filters = has_active_filters(filters)
-
-    if not json_output and has_filters:
-        print(f"Filters: {', '.join(f'{k}={v}' for k, v in filters.items() if v)}")
-
-    # BM25 shortcut: skip embedding + vector + rerank when FTS is high-confidence
-    bm25_shortcut = False
-    fts_q = fts_escape(clean_question)
-    if fts_q and not has_filters:
-        try:
-            probe = conn.execute(
-                "SELECT rowid, rank FROM fts_chunks WHERE fts_chunks MATCH ? ORDER BY rank LIMIT 2",
-                (fts_q,),
-            ).fetchall()
-            if probe:
-                top_norm = abs(probe[0]["rank"]) / (1.0 + abs(probe[0]["rank"]))
-                second_norm = (
-                    abs(probe[1]["rank"]) / (1.0 + abs(probe[1]["rank"]))
-                    if len(probe) > 1
-                    else 0.0
-                )
-                if top_norm >= 0.85 and (top_norm - second_norm) >= 0.15:
-                    bm25_shortcut = True
-        except sqlite3.OperationalError:
-            pass
-
-    if bm25_shortcut:
-        t0 = time.time()
-        fts_rows = conn.execute(
-            "SELECT rowid, rank FROM fts_chunks WHERE fts_chunks MATCH ? ORDER BY rank LIMIT ?",
-            (fts_q, top_k),
-        ).fetchall()
-        fts_results = [(r["rowid"], r["rank"]) for r in fts_rows]
-        search_ms = (time.time() - t0) * 1000
-        embed_ms = 0.0
-
-        results = []
-        for chunk_id, fts_rank in fts_results:
-            abs_rank = abs(fts_rank)
-            norm_bm25 = abs_rank / (1.0 + abs_rank)
-            results.append(
-                {
-                    "chunk_id": chunk_id,
-                    "rrf_score": norm_bm25,
-                    "distance": None,
-                    "similarity": None,
-                    "fts_rank": fts_rank,
-                    "text": None,
-                    "doc_path": None,
-                    "heading": None,
-                    "in_fts": True,
-                    "in_vec": False,
-                }
-            )
-        fill_fts_only_results(conn, results)
-    else:
-        t0 = time.time()
-        resp = client.embeddings.create(
-            model=cfg.embed_model, input=[clean_question], dimensions=cfg.embed_dims
-        )
-        query_emb = resp.data[0].embedding
-        embed_ms = (time.time() - t0) * 1000
-
-        retrieve_k = max(cfg.rerank_fetch_k, top_k * 3)
-
-        t0 = time.time()
-        vec_rows = conn.execute(
-            "SELECT chunk_id, distance, chunk_text, doc_path, heading "
-            "FROM vec_chunks WHERE embedding MATCH ? AND k = ? ORDER BY distance",
-            (serialize_f32(query_emb), retrieve_k),
-        ).fetchall()
-        vec_results = [
-            (r["chunk_id"], r["distance"], r["chunk_text"], r["doc_path"], r["heading"])
-            for r in vec_rows
-        ]
-        vec_ms = (time.time() - t0) * 1000
-
-        t0 = time.time()
-        fts_results = []
-        if fts_q:
-            try:
-                fts_rows = conn.execute(
-                    "SELECT rowid, rank FROM fts_chunks WHERE fts_chunks MATCH ? ORDER BY rank LIMIT ?",
-                    (fts_q, retrieve_k),
-                ).fetchall()
-                fts_results = [(r["rowid"], r["rank"]) for r in fts_rows]
-            except sqlite3.OperationalError:
-                pass
-        fts_ms = (time.time() - t0) * 1000
-        search_ms = vec_ms + fts_ms
-
-        results = rrf_fuse(vec_results, fts_results, cfg.rerank_fetch_k, cfg)
-        fill_fts_only_results(conn, results)
-
-        if has_filters:
-            results = apply_filters(results, filters, conn)
-
-        if len(results) > cfg.rerank_top_k:
-            results = llm_rerank(client, clean_question, results, cfg)
-
-    filtered = [
-        r
-        for r in results
-        if r["similarity"] is None or r["similarity"] >= cfg.ask_threshold
-    ]
-
-    if not filtered:
-        if json_output:
-            out = {
-                "question": clean_question,
-                "answer": None,
-                "model": cfg.chat_model,
-                "bm25_shortcut": bm25_shortcut,
-                "timing_ms": {
-                    "embed": round(embed_ms),
-                    "search": round(search_ms),
-                    "generate": 0,
-                },
-                "tokens": {"prompt": 0, "completion": 0},
-                "sources": [],
-            }
-            print(json.dumps(out, ensure_ascii=False))
-        else:
-            shortcut_tag = " (bm25 shortcut)" if bm25_shortcut else ""
-            print(f"Q: {clean_question}")
-            print(
-                f"(embed: {embed_ms:.0f}ms | search: {search_ms:.1f}ms{shortcut_tag})"
-            )
-            print("\nNo relevant documents found.")
-        conn.close()
-        return
-
-    context_parts = []
-    source_entries = []  # (doc_path, display_heading) for dedup
-    for i, r in enumerate(filtered):
-        sim = (
-            f"relevance: {r['similarity']:.2f}"
-            if r["similarity"] is not None
-            else "keyword match"
-        )
-        # Prefer heading_ancestry (full breadcrumb) from chunks table
-        ancestry = None
-        row = conn.execute(
-            "SELECT heading_ancestry FROM chunks WHERE id = ?",
-            (r["chunk_id"],),
-        ).fetchone()
-        if row and row["heading_ancestry"]:
-            ancestry = row["heading_ancestry"]
-
-        display_heading = ancestry or r["heading"] or ""
-        label = f"[{i + 1}] {r['doc_path']}"
-        if display_heading:
-            label += f" > {display_heading}"
-        context_parts.append(f"--- Source {label} ({sim}) ---\n{r['text']}")
-        source_key = (r["doc_path"], display_heading)
-        if r["doc_path"] and source_key not in source_entries:
-            source_entries.append(source_key)
-
-    context = "\n\n".join(context_parts)
-
-    t0 = time.time()
-    chat_resp = client.chat.completions.create(
-        model=cfg.chat_model,
-        messages=[
-            {
-                "role": "system",
-                "content": (
-                    "You answer questions based on the provided context from a personal knowledge base. "
-                    "Be direct and concise. If the context doesn't contain enough information, say so. "
-                    "Cite sources by their number [1], [2], etc. when referencing specific information."
-                ),
-            },
-            {
-                "role": "user",
-                "content": f"Context:\n{context}\n\n---\nQuestion: {clean_question}",
-            },
-        ],
-        temperature=0.3,
-        max_tokens=1000,
-    )
-    answer = chat_resp.choices[0].message.content
-    gen_ms = (time.time() - t0) * 1000
-    tokens = chat_resp.usage
-
-    conn.close()
 
     if json_output:
         out = {
-            "question": clean_question,
-            "answer": answer,
-            "model": cfg.chat_model,
-            "bm25_shortcut": bm25_shortcut,
-            "timing_ms": {
-                "embed": round(embed_ms),
-                "search": round(search_ms),
-                "generate": round(gen_ms),
-            },
-            "tokens": {
-                "prompt": tokens.prompt_tokens,
-                "completion": tokens.completion_tokens,
-            },
-            "sources": [
-                {"rank": i + 1, "doc_path": path, "heading": heading}
-                for i, (path, heading) in enumerate(source_entries)
-            ],
+            "question": result["question"],
+            "answer": result["answer"],
+            "model": result["model"],
+            "bm25_shortcut": result["bm25_shortcut"],
+            "timing_ms": result["timing_ms"],
+            "tokens": result["tokens"],
+            "sources": result["sources"],
         }
         print(json.dumps(out, ensure_ascii=False))
         return
 
-    print(f"Q: {clean_question}")
+    clean_question = result["question"]
+    timing = result["timing_ms"]
+    bm25_shortcut = result["bm25_shortcut"]
+    rerank_info = result.get("rerank")
+
+    if result.get("filters"):
+        print(f"Filters: {', '.join(f'{k}={v}' for k, v in result['filters'].items())}")
+
     shortcut_tag = " (bm25 shortcut)" if bm25_shortcut else ""
+    print(f"Q: {clean_question}")
     print(
-        f"(embed: {embed_ms:.0f}ms | search: {search_ms:.1f}ms | generate: {gen_ms:.0f}ms{shortcut_tag})"
+        f"(embed: {timing['embed']}ms | search: {timing['search']}ms | generate: {timing['generate']}ms{shortcut_tag})"
     )
-    print(f"(model: {cfg.chat_model})")
-    print(f"(tokens: {tokens.prompt_tokens} in / {tokens.completion_tokens} out)")
-    print(f"(results: {len(results)} retrieved, {len(filtered)} above threshold)\n")
-    print(answer)
+
+    if result["answer"] is None:
+        print("\nNo relevant documents found.")
+        return
+
+    if rerank_info:
+        print(
+            f"(rerank: {rerank_info['rerank_ms']:.0f}ms, "
+            f"{rerank_info['prompt_tokens']}+{rerank_info['completion_tokens']} tokens, "
+            f"{rerank_info['input_count']} -> {rerank_info['output_count']})"
+        )
+
+    print(f"(model: {result['model']})")
+    print(
+        f"(tokens: {result['tokens']['prompt']} in / {result['tokens']['completion']} out)"
+    )
+    print(
+        f"(results: {result.get('result_count', '?')} retrieved, "
+        f"{result.get('filtered_count', '?')} above threshold)\n"
+    )
+    print(result["answer"])
     print("\n--- Sources ---")
-    for i, (path, heading) in enumerate(source_entries, 1):
-        if heading:
-            print(f"  [{i}] {path} > {heading}")
+    for src in result["sources"]:
+        if src["heading"]:
+            print(f"  [{src['rank']}] {src['doc_path']} > {src['heading']}")
         else:
-            print(f"  [{i}] {path}")
-
-
-def _resolve_doc_path(
-    cfg: Config, conn: sqlite3.Connection, file_arg: str
-) -> str | None:
-    """Resolve a file argument to a doc_path in the DB."""
-    p = Path(file_arg).expanduser().resolve()
-
-    # Try relative to config_dir
-    if cfg.config_dir:
-        try:
-            rel = str(p.relative_to(cfg.config_dir))
-            row = conn.execute(
-                "SELECT path FROM documents WHERE path = ?", (rel,)
-            ).fetchone()
-            if row:
-                return row["path"]
-        except ValueError:
-            pass
-
-    # Try as-is
-    row = conn.execute(
-        "SELECT path FROM documents WHERE path = ?", (file_arg,)
-    ).fetchone()
-    if row:
-        return row["path"]
-
-    # Try matching suffix
-    rows = conn.execute("SELECT path FROM documents").fetchall()
-    for r in rows:
-        if r["path"].endswith(file_arg) or file_arg.endswith(r["path"]):
-            return r["path"]
-
-    return None
+            print(f"  [{src['rank']}] {src['doc_path']}")
 
 
 def cmd_similar(file_arg: str, cfg: Config, top_k: int = 10):
-    if not cfg.db_path.exists():
-        print("No index found. Run 'kb index' first.")
+    try:
+        result = similar_core(file_arg, cfg, top_k)
+    except NoIndexError as e:
+        print(str(e))
+        sys.exit(1)
+    except FileNotIndexedError as e:
+        print(str(e))
+        if "not in index" in str(e).lower():
+            print("Run 'kb index' to index it first.")
         sys.exit(1)
 
-    conn = connect(cfg)
-
-    doc_path = _resolve_doc_path(cfg, conn, file_arg)
-    if not doc_path:
-        print(f"File not in index: {file_arg}")
-        print("Run 'kb index' to index it first.")
-        conn.close()
-        sys.exit(1)
-
-    # Get chunk IDs for this document
-    chunk_ids = [
-        r["id"]
-        for r in conn.execute(
-            "SELECT c.id FROM chunks c JOIN documents d ON d.id = c.doc_id WHERE d.path = ?",
-            (doc_path,),
-        ).fetchall()
-    ]
-
-    if not chunk_ids:
-        print(f"No chunks found for {doc_path}.")
-        conn.close()
-        sys.exit(1)
-
-    # Read embeddings and average them
-    embeddings = []
-    for cid in chunk_ids:
-        row = conn.execute(
-            "SELECT embedding FROM vec_chunks WHERE chunk_id = ?", (cid,)
-        ).fetchone()
-        if row:
-            embeddings.append(deserialize_f32(row["embedding"]))
-
-    if not embeddings:
-        print(f"No embeddings found for {doc_path}.")
-        conn.close()
-        sys.exit(1)
-
-    # Average into a single vector
-    dims = len(embeddings[0])
-    avg = [sum(e[d] for e in embeddings) / len(embeddings) for d in range(dims)]
-
-    # KNN query — fetch extra to account for self-document filtering
-    fetch_k = top_k + len(chunk_ids) + 5
-    rows = conn.execute(
-        "SELECT chunk_id, distance, doc_path FROM vec_chunks "
-        "WHERE embedding MATCH ? AND k = ? ORDER BY distance",
-        (serialize_f32(avg), fetch_k),
-    ).fetchall()
-
-    # Aggregate by document, skip source document
-    best_per_doc: dict[str, float] = {}
-    for r in rows:
-        dp = r["doc_path"]
-        if dp == doc_path:
-            continue
-        dist = r["distance"]
-        if dp not in best_per_doc or dist < best_per_doc[dp]:
-            best_per_doc[dp] = dist
-
-    # Sort by similarity (1 - distance) descending
-    ranked = sorted(best_per_doc.items(), key=lambda x: x[1])[:top_k]
-
-    if not ranked:
-        print(f"No similar documents found for {doc_path}.")
-        conn.close()
+    if not result["results"]:
+        print(f"No similar documents found for {result['source']}.")
         return
 
-    # Get titles
-    titles = {}
-    for r in conn.execute("SELECT path, title FROM documents").fetchall():
-        titles[r["path"]] = r["title"]
-
-    print(f"Documents similar to: {doc_path}\n")
-    for i, (dp, dist) in enumerate(ranked, 1):
-        sim = 1 - dist
-        title = titles.get(dp, "")
-        print(f"--- [{i}] {dp} (sim:{sim:.3f}) ---")
-        if title:
-            print(f"    {title}")
-
-    conn.close()
+    print(f"Documents similar to: {result['source']}\n")
+    for r in result["results"]:
+        print(f"--- [{r['rank']}] {r['doc_path']} (sim:{r['similarity']:.3f}) ---")
+        if r["title"]:
+            print(f"    {r['title']}")
 
 
 def cmd_tag(cfg: Config, file_arg: str, new_tags: list[str]):
@@ -925,48 +512,40 @@ def cmd_tags(cfg: Config):
 
 
 def cmd_stats(cfg: Config):
-    if not cfg.db_path.exists():
-        print("No index found.")
+    result = stats_core(cfg)
+    if "error" in result:
+        print(result["error"])
         return
 
-    conn = connect(cfg)
-
-    doc_count = conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
-    chunk_count = conn.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
-    vec_count = conn.execute("SELECT COUNT(*) FROM vec_chunks").fetchone()[0]
-    total_chars = conn.execute(
-        "SELECT COALESCE(SUM(char_count), 0) FROM chunks"
-    ).fetchone()[0]
-
-    fts_count = 0
-    try:
-        fts_count = conn.execute("SELECT COUNT(*) FROM fts_chunks").fetchone()[0]
-    except sqlite3.OperationalError:
-        pass
-
-    type_counts = conn.execute(
-        "SELECT type, COUNT(*) as cnt FROM documents GROUP BY type ORDER BY type"
-    ).fetchall()
-
-    print(f"DB: {cfg.db_path} ({cfg.db_path.stat().st_size / 1024:.1f} KB)")
-    print(f"Documents: {doc_count}", end="")
-    if type_counts:
-        parts = [f"{r[1]} {r[0]}" for r in type_counts]
+    db_size_kb = result["db_size_bytes"] / 1024
+    print(f"DB: {result['db_path']} ({db_size_kb:.1f} KB)")
+    print(f"Documents: {result['doc_count']}", end="")
+    if result["type_counts"]:
+        parts = [f"{cnt} {t}" for t, cnt in result["type_counts"].items()]
         print(f" ({', '.join(parts)})", end="")
     print()
-    print(f"Chunks: {chunk_count} | Vectors: {vec_count} | FTS entries: {fts_count}")
-    print(f"Total text: {total_chars:,} chars (~{total_chars // 4:,} tokens)")
+    print(
+        f"Chunks: {result['chunk_count']} | Vectors: {result['vec_count']} "
+        f"| FTS entries: {result['fts_count']}"
+    )
+    print(
+        f"Total text: {result['total_chars']:,} chars "
+        f"(~{result['total_chars'] // 4:,} tokens)"
+    )
 
     print("\nCapabilities:")
     print(
-        f"  chonkie chunking:   {'yes' if CHONKIE_AVAILABLE else 'no (pip install chonkie)'}"
+        f"  chonkie chunking:   "
+        f"{'yes' if CHONKIE_AVAILABLE else 'no (pip install chonkie)'}"
     )
     print(
-        f"  LLM rerank:         yes (ask mode, top-{cfg.rerank_fetch_k} -> top-{cfg.rerank_top_k})"
+        f"  LLM rerank:         yes (ask mode, "
+        f"top-{cfg.rerank_fetch_k} -> top-{cfg.rerank_top_k})"
     )
     print('  Pre-search filters: yes (file:, type:, tag:, dt>, dt<, +"kw", -"kw")')
     print(
-        f"  Index code files:   {'yes' if cfg.index_code else 'no (set index_code = true)'}"
+        f"  Index code files:   "
+        f"{'yes' if cfg.index_code else 'no (set index_code = true)'}"
     )
 
     exts = sorted(supported_extensions(include_code=cfg.index_code))
@@ -978,14 +557,12 @@ def cmd_stats(cfg: Config):
             print(f"  {ext}: unavailable (pip install {pkg})")
 
     print("\nDocuments:")
-    for row in conn.execute(
-        "SELECT path, title, type, chunk_count, content_hash, indexed_at FROM documents ORDER BY path"
-    ):
-        h = row[4][:8] if row[4] else "n/a"
-        type_tag = f" [{row[2]}]" if row[2] != "markdown" else ""
-        print(f"  {row[0]}: {row[3]} chunks [{h}]{type_tag} ({row[1]})")
-
-    conn.close()
+    for doc in result["documents"]:
+        h = doc["content_hash"][:8] if doc["content_hash"] else "n/a"
+        type_tag = f" [{doc['type']}]" if doc["type"] != "markdown" else ""
+        print(
+            f"  {doc['path']}: {doc['chunk_count']} chunks [{h}]{type_tag} ({doc['title']})"
+        )
 
 
 def _format_size(size: int) -> str:
@@ -997,17 +574,12 @@ def _format_size(size: int) -> str:
 
 
 def cmd_list(cfg: Config, full: bool = False):
-    if not cfg.db_path.exists():
-        print("No index found. Run 'kb index' first.")
+    result = list_core(cfg)
+    if "error" in result:
+        print(result["error"])
         return
 
-    conn = connect(cfg)
-    rows = conn.execute(
-        "SELECT path, type, chunk_count, size_bytes, indexed_at "
-        "FROM documents ORDER BY path"
-    ).fetchall()
-    conn.close()
-
+    rows = result["documents"]
     if not rows:
         print("No documents indexed.")
         return
@@ -1017,22 +589,22 @@ def cmd_list(cfg: Config, full: bool = False):
         for r in rows:
             path = r["path"]
             doc_type = r["type"] or "unknown"
-            chunks = r["chunk_count"] or 0
-            size = r["size_bytes"] or 0
+            chunks = r["chunk_count"]
+            size = r["size_bytes"]
             date = (r["indexed_at"] or "")[:10]
             print(
-                f"  {path:<50} {doc_type:<12} {chunks:>3} chunks  {_format_size(size):>10}  {date}"
+                f"  {path:<50} {doc_type:<12} {chunks:>3} chunks  "
+                f"{_format_size(size):>10}  {date}"
             )
         return
 
-    # Summary view: count and size by type
     type_stats: dict[str, dict] = {}
     total_size = 0
     total_chunks = 0
     for r in rows:
         doc_type = r["type"] or "unknown"
-        size = r["size_bytes"] or 0
-        chunks = r["chunk_count"] or 0
+        size = r["size_bytes"]
+        chunks = r["chunk_count"]
         total_size += size
         total_chunks += chunks
         if doc_type not in type_stats:
@@ -1042,31 +614,39 @@ def cmd_list(cfg: Config, full: bool = False):
         type_stats[doc_type]["chunks"] += chunks
 
     print(
-        f"{len(rows)} documents indexed ({_format_size(total_size)}, {total_chunks} chunks)\n"
+        f"{len(rows)} documents indexed "
+        f"({_format_size(total_size)}, {total_chunks} chunks)\n"
     )
     for doc_type in sorted(
         type_stats, key=lambda t: type_stats[t]["count"], reverse=True
     ):
         s = type_stats[doc_type]
         print(
-            f"  {doc_type:<12} {s['count']:>4} docs  {s['chunks']:>5} chunks  {_format_size(s['size']):>10}"
+            f"  {doc_type:<12} {s['count']:>4} docs  {s['chunks']:>5} chunks  "
+            f"{_format_size(s['size']):>10}"
         )
     print("\nUse 'kb list --full' for per-file details.")
 
 
 def cmd_completion(shell: str):
-    subcommands = "init add remove sources index allow search fts ask similar tag untag tags stats reset list version completion"
+    subcommands = (
+        "init add remove sources index allow search fts ask similar "
+        "tag untag tags stats reset list version mcp completion"
+    )
 
     if shell == "zsh":
-        print(f"""\
+        print(
+            f"""\
 _kb() {{
   local -a commands
   commands=({subcommands})
   _arguments '1:command:({" ".join(subcommands.split())})' '*:file:_files'
 }}
-compdef _kb kb""")
+compdef _kb kb"""
+        )
     elif shell == "bash":
-        print(f"""\
+        print(
+            f"""\
 _kb() {{
   local cur commands
   COMPREPLY=()
@@ -1094,7 +674,8 @@ _kb() {{
     esac
   fi
 }}
-complete -F _kb kb""")
+complete -F _kb kb"""
+        )
     elif shell == "fish":
         cmds = subcommands.split()
         print("# Fish completions for kb")
@@ -1105,11 +686,13 @@ complete -F _kb kb""")
         )
         print("complete -c kb -n '__fish_seen_subcommand_from init' -a '--project'")
         print(
-            "complete -c kb -n '__fish_seen_subcommand_from search ask' -a '--threshold --json'"
+            "complete -c kb -n '__fish_seen_subcommand_from search ask' "
+            "-a '--threshold --json'"
         )
         print("complete -c kb -n '__fish_seen_subcommand_from fts' -a '--json'")
         print(
-            "complete -c kb -n '__fish_seen_subcommand_from completion' -a 'zsh bash fish'"
+            "complete -c kb -n '__fish_seen_subcommand_from completion' "
+            "-a 'zsh bash fish'"
         )
     else:
         print(f"Unsupported shell: {shell}")
@@ -1150,6 +733,12 @@ def main():
             print("Usage: kb completion <zsh|bash|fish>")
             sys.exit(0 if len(args) > 1 and args[1] in ("-h", "--help") else 1)
         cmd_completion(args[1])
+        sys.exit(0)
+
+    if cmd == "mcp":
+        from .mcp_server import main as mcp_main
+
+        mcp_main()
         sys.exit(0)
 
     # All other commands need config

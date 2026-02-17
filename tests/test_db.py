@@ -259,6 +259,97 @@ class TestConnect:
         assert "fts_au" in triggers
         conn2.close()
 
+    def test_v5_to_v6_migration_adds_porter_tokenizer(self, tmp_config):
+        """v5 -> v6 drops fts_chunks and recreates with porter tokenizer."""
+        import sqlite_vec
+
+        tmp_config.db_path.parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(str(tmp_config.db_path))
+        conn.enable_load_extension(True)
+        sqlite_vec.load(conn)
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)"
+        )
+        conn.execute(
+            "INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', '5')"
+        )
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS documents (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                path TEXT UNIQUE NOT NULL,
+                title TEXT,
+                type TEXT,
+                size_bytes INTEGER,
+                content_hash TEXT,
+                indexed_at TEXT DEFAULT (datetime('now')),
+                chunk_count INTEGER DEFAULT 0,
+                tags TEXT DEFAULT ''
+            )
+        """)
+        conn.execute(
+            "INSERT INTO documents (path, title, type, size_bytes, content_hash, chunk_count) "
+            "VALUES ('test.md', 'Test', 'markdown', 100, 'abc', 1)"
+        )
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS chunks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                doc_id INTEGER NOT NULL,
+                chunk_index INTEGER NOT NULL,
+                text TEXT NOT NULL,
+                heading TEXT,
+                heading_ancestry TEXT,
+                char_count INTEGER,
+                content_hash TEXT
+            )
+        """)
+        conn.execute(f"""
+            CREATE VIRTUAL TABLE IF NOT EXISTS vec_chunks USING vec0(
+                chunk_id INTEGER PRIMARY KEY,
+                embedding float[{tmp_config.embed_dims}],
+                +chunk_text TEXT,
+                +doc_path TEXT,
+                +heading TEXT
+            )
+        """)
+        # Old FTS without porter tokenizer
+        conn.execute("""
+            CREATE VIRTUAL TABLE IF NOT EXISTS fts_chunks USING fts5(
+                text,
+                heading,
+                content='chunks',
+                content_rowid='id'
+            )
+        """)
+        conn.commit()
+        conn.close()
+
+        # Reconnect — should migrate v5->v6
+        conn2 = connect(tmp_config)
+        # Data preserved
+        count = conn2.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
+        assert count == 1
+        # Schema version updated
+        version = conn2.execute(
+            "SELECT value FROM meta WHERE key = 'schema_version'"
+        ).fetchone()
+        assert int(version[0]) == SCHEMA_VERSION
+        # FTS table recreated (with porter tokenizer)
+        fts_sql = conn2.execute(
+            "SELECT sql FROM sqlite_master WHERE name = 'fts_chunks'"
+        ).fetchone()[0]
+        assert "porter" in fts_sql
+        # Triggers exist
+        triggers = {
+            r[0]
+            for r in conn2.execute(
+                "SELECT name FROM sqlite_master WHERE type='trigger'"
+            ).fetchall()
+        }
+        assert "fts_ai" in triggers
+        assert "fts_ad" in triggers
+        assert "fts_au" in triggers
+        conn2.close()
+
     def test_fts_triggers_sync(self, tmp_config):
         """FTS triggers keep fts_chunks in sync with chunks table."""
         conn = connect(tmp_config)
@@ -293,6 +384,30 @@ class TestConnect:
             "SELECT rowid FROM fts_chunks WHERE fts_chunks MATCH '\"hello\"'"
         ).fetchall()
         assert len(fts_rows) == 0
+        conn.close()
+
+    def test_wal_mode_enabled(self, tmp_config):
+        """WAL journal mode is set for better concurrent read performance."""
+        conn = connect(tmp_config)
+        mode = conn.execute("PRAGMA journal_mode").fetchone()[0]
+        assert mode == "wal"
+        conn.close()
+
+    def test_foreign_keys_enabled(self, tmp_config):
+        """Foreign keys pragma is enabled."""
+        conn = connect(tmp_config)
+        fk = conn.execute("PRAGMA foreign_keys").fetchone()[0]
+        assert fk == 1
+        conn.close()
+
+    def test_fts_uses_porter_tokenizer(self, tmp_config):
+        """FTS5 table uses porter unicode61 tokenizer for stemming."""
+        conn = connect(tmp_config)
+        fts_sql = conn.execute(
+            "SELECT sql FROM sqlite_master WHERE name = 'fts_chunks'"
+        ).fetchone()[0]
+        assert "porter" in fts_sql
+        assert "unicode61" in fts_sql
         conn.close()
 
     def test_triggers_created_on_fresh_db(self, tmp_config):

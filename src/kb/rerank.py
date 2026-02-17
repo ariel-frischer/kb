@@ -13,10 +13,10 @@ def llm_rerank(
     question: str,
     results: list[dict],
     cfg: Config,
-) -> list[dict]:
+) -> tuple[list[dict], dict]:
     """RankGPT-style reranking: present numbered passages, ask LLM for ranking."""
     if len(results) <= cfg.rerank_top_k:
-        return results
+        return results, {}
 
     passages = []
     for i, r in enumerate(results):
@@ -67,9 +67,12 @@ def llm_rerank(
 
     reranked = [results[i] for i in ranked_indices[: cfg.rerank_top_k]]
 
-    print(
-        f"(rerank: {rerank_ms:.0f}ms, {tokens.prompt_tokens}+{tokens.completion_tokens} tokens, "
-        f"{len(results)} -> {len(reranked)})"
-    )
+    rerank_info = {
+        "rerank_ms": rerank_ms,
+        "prompt_tokens": tokens.prompt_tokens,
+        "completion_tokens": tokens.completion_tokens,
+        "input_count": len(results),
+        "output_count": len(reranked),
+    }
 
-    return reranked
+    return reranked, rerank_info

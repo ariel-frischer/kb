@@ -8,15 +8,15 @@ from kb.search import fill_fts_only_results, fts_escape, rrf_fuse
 
 class TestFtsEscape:
     def test_single_word(self):
-        assert fts_escape("hello") == '"hello"'
+        assert fts_escape("hello") == '"hello"*'
 
     def test_multiple_words(self):
         result = fts_escape("hello world")
-        assert result == '"hello" OR "world"'
+        assert result == '"hello"* AND "world"*'
 
     def test_strips_punctuation(self):
         result = fts_escape("what's the cost?")
-        assert result == '"what" OR "s" OR "the" OR "cost"'
+        assert result == '"what"* AND "s"* AND "the"* AND "cost"*'
 
     def test_empty_string(self):
         assert fts_escape("") is None

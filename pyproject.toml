@@ -32,14 +32,17 @@ all = [
     "python-pptx",
     "openpyxl",
     "striprtf",
+    "mcp[cli]>=1.8.0",
 ]
 chunking = ["chonkie[hub]"]
 pdf = ["pymupdf"]
 office = ["python-docx", "python-pptx", "openpyxl"]
 rtf = ["striprtf"]
+mcp = ["mcp[cli]>=1.8.0"]
 
 [project.scripts]
 kb = "kb.cli:main"
+kb-mcp = "kb.mcp_server:main"
 
 [project.urls]
 Homepage = "https://github.com/arielfrischer/kb"

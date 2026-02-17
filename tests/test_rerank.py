@@ -25,8 +25,9 @@ class TestLlmRerank:
         cfg = Config(rerank_top_k=5)
         client = MagicMock()
         results = _make_results(3)
-        out = llm_rerank(client, "query", results, cfg)
+        out, info = llm_rerank(client, "query", results, cfg)
         assert out == results
+        assert info == {}
         client.chat.completions.create.assert_not_called()
 
     def test_reranks_by_llm_output(self):
@@ -40,13 +41,15 @@ class TestLlmRerank:
         client.chat.completions.create.return_value = mock_resp
 
         results = _make_results(6)
-        out = llm_rerank(client, "query", results, cfg)
+        out, info = llm_rerank(client, "query", results, cfg)
 
         assert len(out) == 3
         # LLM said 3,1,5 so indices 2,0,4
         assert out[0]["chunk_id"] == 2
         assert out[1]["chunk_id"] == 0
         assert out[2]["chunk_id"] == 4
+        assert info["input_count"] == 6
+        assert info["output_count"] == 3
 
     def test_handles_partial_ranking(self):
         """LLM doesn't mention all passages — missing ones appended."""
@@ -60,7 +63,7 @@ class TestLlmRerank:
         client.chat.completions.create.return_value = mock_resp
 
         results = _make_results(5)
-        out = llm_rerank(client, "query", results, cfg)
+        out, info = llm_rerank(client, "query", results, cfg)
 
         assert len(out) == 4
         # First two are the LLM picks (indices 1, 3)
@@ -78,7 +81,7 @@ class TestLlmRerank:
         client.chat.completions.create.return_value = mock_resp
 
         results = _make_results(4)
-        out = llm_rerank(client, "query", results, cfg)
+        out, info = llm_rerank(client, "query", results, cfg)
 
         assert len(out) == 3
         assert out[0]["chunk_id"] == 0  # index 0 from "1"

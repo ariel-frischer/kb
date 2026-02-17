@@ -7,11 +7,13 @@ from .config import Config
 
 
 def fts_escape(query: str) -> str | None:
-    """Convert plain text to FTS5 OR query of quoted terms."""
+    """Convert plain text to FTS5 AND query with prefix matching."""
     words = re.findall(r"\w+", query)
     if not words:
         return None
-    return " OR ".join(f'"{w}"' for w in words)
+    if len(words) == 1:
+        return f'"{words[0]}"*'
+    return " AND ".join(f'"{w}"*' for w in words)
 
 
 def _rank_bonus(rank: int) -> float:

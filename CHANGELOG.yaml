@@ -1,0 +1,178 @@
+releases:
+  - version: "unreleased"
+    date: null
+    added:
+      - description: "FTS-only keyword search command (`kb fts`) for fast, no-API searches"
+        commits: ["2bfe417"]
+      - description: "Positional rank bonuses in RRF fusion scoring"
+        commits: ["2bfe417"]
+      - description: "`--json` flag for `kb search` and `kb ask` structured output"
+        commits: ["cce0a74"]
+      - description: "FTS5 trigger-based sync with porter stemming tokenizer"
+        commits: ["cce0a74", "5b145f1"]
+      - description: "MCP server exposing search/ask/fts/similar/status/list tools for AI agents"
+        commits: ["5b145f1", "5d35d92"]
+      - description: "Core API module (`api.py`) separating logic from CLI presentation"
+        commits: ["5b145f1"]
+    fixed:
+      - description: "RRF fusion rank bonus application for accurate scoring"
+        commits: ["6484412"]
+      - description: "FTS escape to use AND queries with prefix matching"
+        commits: ["5b145f1"]
+      - description: "Enable WAL mode and foreign keys for better DB performance"
+        commits: ["5b145f1"]
+    changed:
+      - description: "Schema version upgraded from 4 to 6 (FTS triggers + porter tokenizer)"
+        commits: ["cce0a74", "5b145f1"]
+      - description: "CLI refactored to thin wrappers over `api.py` core functions"
+        commits: ["5b145f1"]
+      - description: "BM25 shortcut in ask skips embedding/vector/rerank when FTS results are high-confidence"
+        commits: ["2bfe417"]
+    removed: []
+    deprecated: []
+    breaking: []
+    migration: "Schema auto-migrates from v4→v5→v6. FTS index is rebuilt automatically."
+    contributors: ["ariel-frischer"]
+
+  - version: "1.0.8"
+    date: "2026-02-16"
+    added:
+      - description: "Show relevant snippet centered on query matches in search results"
+        commits: ["17f89a3"]
+    fixed: []
+    changed: []
+    removed: []
+    deprecated: []
+    breaking: []
+    migration: null
+    contributors: ["ariel-frischer"]
+
+  - version: "1.0.7"
+    date: "2026-02-16"
+    changed:
+      - description: "Split `threshold` into `search_threshold` and `ask_threshold` for independent tuning"
+        commits: ["e3b942f"]
+    added: []
+    fixed: []
+    removed: []
+    deprecated: []
+    breaking: []
+    migration: null
+    contributors: ["ariel-frischer"]
+
+  - version: "1.0.6"
+    date: "2026-02-16"
+    fixed:
+      - description: "Default threshold changed from 0.25 to 0.001 for more inclusive results"
+        commits: ["a636bc2"]
+      - description: "Apply threshold after top_k to reduce results instead of backfilling"
+        commits: ["6eb0fcb"]
+    added: []
+    changed: []
+    removed: []
+    deprecated: []
+    breaking: []
+    migration: null
+    contributors: ["ariel-frischer"]
+
+  - version: "1.0.5"
+    date: "2026-02-16"
+    added:
+      - description: "`--threshold` flag for `kb search` command"
+        commits: ["802f959"]
+    changed:
+      - description: "Rename `min_similarity` config key to `threshold`"
+        commits: ["802f959"]
+    fixed: []
+    removed: []
+    deprecated: []
+    breaking: []
+    migration: null
+    contributors: ["ariel-frischer"]
+
+  - version: "1.0.4"
+    date: "2026-02-16"
+    added:
+      - description: "Version command (`kb version`, `kb v`, `kb --version`)"
+        commits: ["38056fc", "4a66a3c"]
+    fixed: []
+    changed: []
+    removed: []
+    deprecated: []
+    breaking: []
+    migration: null
+    contributors: ["ariel-frischer"]
+
+  - version: "1.0.3"
+    date: "2026-02-16"
+    added:
+      - description: "`--threshold` parameter for `kb ask` command"
+        commits: ["49b85a1"]
+    fixed: []
+    changed: []
+    removed: []
+    deprecated: []
+    breaking: []
+    migration: null
+    contributors: ["ariel-frischer"]
+
+  - version: "1.0.2"
+    date: "2026-02-16"
+    added:
+      - description: "Per-subcommand `-h`/`--help` support"
+        commits: ["77c1435"]
+      - description: "Show model name in `kb ask` output"
+        commits: ["77c1435"]
+    fixed: []
+    changed: []
+    removed: []
+    deprecated: []
+    breaking: []
+    migration: null
+    contributors: ["ariel-frischer"]
+
+  - version: "1.0.1"
+    date: "2026-02-16"
+    fixed:
+      - description: "Zsh completion function updated to use `compdef` for better compatibility"
+        commits: ["06bb17f"]
+    added: []
+    changed: []
+    removed: []
+    deprecated: []
+    breaking: []
+    migration: null
+    contributors: ["ariel-frischer"]
+
+  - version: "1.0.0"
+    date: "2026-02-16"
+    added:
+      - description: "CLI knowledge base tool with hybrid search (sqlite-vec + FTS5) and RAG answers"
+        commits: ["ea927ee"]
+      - description: "Support for 30+ document formats (markdown, PDF, DOCX, EPUB, HTML, ODT, RTF, plain text, email, subtitles, and more)"
+        commits: ["bba0458"]
+      - description: "Document tagging with auto-extraction from markdown YAML frontmatter"
+        commits: ["0ad42bb"]
+      - description: "Similar document search via embedding averaging"
+        commits: ["0ad42bb"]
+      - description: "`.kbignore` pattern support for file filtering"
+        commits: ["6112327"]
+      - description: "Global and project-local scope modes with config walk-up"
+        commits: ["894143e"]
+      - description: "`kb list` command with `--full` detailed output"
+        commits: ["4cc54fb"]
+      - description: "Inline filter syntax (`file:`, `type:`, `tag:`, `dt>`, `dt<`, `+\"kw\"`, `-\"kw\"`)"
+        commits: ["0ad42bb"]
+      - description: "GitHub Actions CI and release workflows"
+        commits: ["86c4c24", "ea927ee"]
+      - description: "Makefile for project management and development commands"
+        commits: ["d30c381"]
+      - description: "MIT license"
+        commits: ["86c4c24"]
+    fixed: []
+    changed: []
+    removed: []
+    deprecated: []
+    breaking: []
+    migration: null
+    contributors: ["ariel-frischer"]

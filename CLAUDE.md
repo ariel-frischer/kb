@@ -76,3 +76,4 @@ Path resolution: `Config.doc_path_for_db()` computes stored paths — relative t
 - **Tags** — stored comma-separated in `documents.tags` column; auto-parsed from markdown YAML frontmatter during indexing; manually managed via `kb tag`/`kb untag`
 - **MCP server** — `kb mcp` / `kb-mcp` starts a Model Context Protocol server (stdio transport) exposing search/ask/fts/similar/status/list as tools for Claude Desktop, Claude Code, and other MCP clients. Optional dep: `mcp[cli]` (included in `kb[all]`)
 - **CLI/API split** — `api.py` contains all core logic (returns dicts), `cli.py` is a thin presentation layer. Both CLI and MCP server call the same core functions.
+- **Structured changelog** — `CHANGELOG.yaml` with per-release categories (added/fixed/changed/removed/deprecated/breaking), commit SHAs, migration notes. `make changelog` scaffolds entries from git history via `scripts/changelog_entry.py`.

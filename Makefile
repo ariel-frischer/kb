@@ -1,4 +1,4 @@
-.PHONY: install install-dev lint format test check clean
+.PHONY: install install-dev lint format test check clean changelog
 
 install:  ## Install with all features
 	uv tool install "kb[all] @ ." --force --reinstall
@@ -18,6 +18,12 @@ test:  ## Run tests
 check: lint  ## Lint + format check + test
 	uv run ruff format --check .
 	uv run pytest
+
+changelog:  ## Scaffold changelog entry from recent commits
+	uv run python scripts/changelog_entry.py
+
+changelog-write:  ## Scaffold and insert changelog entry into CHANGELOG.yaml
+	uv run python scripts/changelog_entry.py --write
 
 clean:  ## Remove build artifacts
 	rm -rf build/ dist/ *.egg-info/ .pytest_cache/ .ruff_cache/

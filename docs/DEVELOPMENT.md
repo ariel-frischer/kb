@@ -63,6 +63,17 @@ src/kb/
 - **Config walks up from cwd** — like `.gitignore`, so `kb` works from any subdirectory
 - **Tags** — comma-separated in `documents.tags` column; auto-parsed from markdown YAML frontmatter, manually managed via `kb tag`/`kb untag`
 
+## Changelog
+
+The project keeps a structured `CHANGELOG.yaml` at the repo root. Each release entry has categories (`added`, `fixed`, `changed`, `removed`, `deprecated`, `breaking`), commit SHAs, and optional migration notes.
+
+```bash
+make changelog          # preview new entry from commits since last tag
+make changelog-write    # insert entry into CHANGELOG.yaml
+```
+
+The scaffold script (`scripts/changelog_entry.py`) reads the version from `pyproject.toml`, collects commits since the last tag, and categorizes by conventional commit prefix. Review and edit the generated entry before committing — auto-generated descriptions are a starting point, not final copy.
+
 ## Reference docs
 
 - [.kbignore patterns](kbignore.md) — common ignore patterns by use case
@@ -89,4 +100,5 @@ uv run pytest -v
 2. Create a feature branch (`git checkout -b feat/my-feature`)
 3. Make changes and add tests
 4. Run `make check` (must pass)
-5. Open a PR against `main`
+5. Update `CHANGELOG.yaml` (add entry under `unreleased`)
+6. Open a PR against `main`

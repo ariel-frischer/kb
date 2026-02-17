@@ -47,6 +47,10 @@ sources = [
 # rerank_method = "llm"     # "llm" (RankGPT, default) or "cross-encoder" (local, no API cost)
 # cross_encoder_model = "cross-encoder/ms-marco-MiniLM-L-6-v2"
 
+# HyDE (Hypothetical Document Embeddings)
+# hyde_enabled = true                # generate hypothetical passage before vector search
+# hyde_model = ""                    # LLM for HyDE ("" = use chat_model)
+
 # Format options
 # index_code = false                # also index source code files (.py, .js, .ts, etc.)
 
@@ -71,6 +75,10 @@ sources = [
 
 # LLM
 # chat_model = "gpt-4o-mini"
+
+# HyDE (Hypothetical Document Embeddings)
+# hyde_enabled = true                # generate hypothetical passage before vector search
+# hyde_model = ""                    # LLM for HyDE ("" = use chat_model)
 
 # Format options
 # index_code = false                # also index source code files (.py, .js, .ts, etc.)
@@ -104,6 +112,8 @@ class Config:
     index_code: bool = False
     rerank_method: str = "llm"  # "llm" (RankGPT) or "cross-encoder"
     cross_encoder_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    hyde_enabled: bool = True  # generate hypothetical doc before vector search
+    hyde_model: str = ""  # LLM for HyDE ("" = use chat_model)
 
     scope: str = "project"  # "global" or "project"
 

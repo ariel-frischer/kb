@@ -1,7 +1,7 @@
 .PHONY: install install-dev lint format test check clean
 
 install:  ## Install with all features
-	uv tool install "kb[all] @ ." --force
+	uv tool install "kb[all] @ ." --force --reinstall
 
 install-dev:  ## Install dev environment
 	uv sync --all-extras

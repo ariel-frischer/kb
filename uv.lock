@@ -539,9 +539,13 @@ all = [
     { name = "python-pptx" },
     { name = "sentence-transformers" },
     { name = "striprtf" },
+    { name = "transformers" },
 ]
 chunking = [
     { name = "chonkie", extra = ["hub"] },
+]
+expand = [
+    { name = "transformers" },
 ]
 mcp = [
     { name = "mcp", extra = ["cli"] },
@@ -587,8 +591,10 @@ requires-dist = [
     { name = "sqlite-vec" },
     { name = "striprtf", marker = "extra == 'all'" },
     { name = "striprtf", marker = "extra == 'rtf'" },
+    { name = "transformers", marker = "extra == 'all'", specifier = ">=4.30" },
+    { name = "transformers", marker = "extra == 'expand'", specifier = ">=4.30" },
 ]
-provides-extras = ["all", "chunking", "pdf", "office", "rtf", "mcp", "rerank"]
+provides-extras = ["all", "chunking", "pdf", "office", "rtf", "mcp", "rerank", "expand"]
 
 [package.metadata.requires-dev]
 dev = [

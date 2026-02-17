@@ -13,7 +13,7 @@ from .api import (
     similar_core,
     stats_core,
 )
-from .config import find_config, load_secrets
+from .config import Config, find_config, load_secrets
 
 mcp = FastMCP(
     "kb",
@@ -29,8 +29,23 @@ def _get_config():
     return find_config()
 
 
+def _with_expand(cfg: Config, expand: bool) -> Config:
+    """Return a config copy with query_expand set if requested."""
+    if expand and not cfg.query_expand:
+        from copy import copy
+
+        cfg = copy(cfg)
+        cfg.query_expand = True
+    return cfg
+
+
 @mcp.tool()
-def kb_search(query: str, top_k: int = 5, threshold: float | None = None) -> dict:
+def kb_search(
+    query: str,
+    top_k: int = 5,
+    threshold: float | None = None,
+    expand: bool = False,
+) -> dict:
     """Hybrid semantic + keyword search over the knowledge base.
 
     Uses HyDE (Hypothetical Document Embeddings) by default: generates a hypothetical
@@ -43,15 +58,22 @@ def kb_search(query: str, top_k: int = 5, threshold: float | None = None) -> dic
         query: Search query (may include inline filters).
         top_k: Number of results to return.
         threshold: Minimum similarity score (0-1). Omit to use config default.
+        expand: Enable query expansion (keyword synonyms + semantic rephrasings).
     """
     try:
-        return search_core(query, _get_config(), top_k, threshold)
+        cfg = _with_expand(_get_config(), expand)
+        return search_core(query, cfg, top_k, threshold)
     except KBError as e:
         return {"error": str(e)}
 
 
 @mcp.tool()
-def kb_ask(question: str, top_k: int = 8, threshold: float | None = None) -> dict:
+def kb_ask(
+    question: str,
+    top_k: int = 8,
+    threshold: float | None = None,
+    expand: bool = False,
+) -> dict:
     """Ask a question and get a RAG-generated answer with source citations.
 
     Full pipeline: [HyDE] -> hybrid search -> LLM rerank -> confidence filter -> LLM answer.
@@ -62,9 +84,11 @@ def kb_ask(question: str, top_k: int = 8, threshold: float | None = None) -> dic
         question: The question to answer.
         top_k: Number of context chunks to retrieve.
         threshold: Minimum similarity for context chunks.
+        expand: Enable query expansion (keyword synonyms + semantic rephrasings).
     """
     try:
-        return ask_core(question, _get_config(), top_k, threshold)
+        cfg = _with_expand(_get_config(), expand)
+        return ask_core(question, cfg, top_k, threshold)
     except KBError as e:
         return {"error": str(e)}
 

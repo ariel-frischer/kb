@@ -113,51 +113,103 @@ def search_core(
 
     hyde_passage = None
     hyde_ms = 0.0
+    expand_ms = 0.0
+    expansions: list[dict] = []
     embed_input = clean_query
     if cfg.hyde_enabled:
         hyde_passage, hyde_ms = generate_hyde_passage(clean_query, client, cfg)
         if hyde_passage:
             embed_input = hyde_passage
 
-    t0 = time.time()
-    resp = client.embeddings.create(
-        model=cfg.embed_model, input=[embed_input], dimensions=cfg.embed_dims
-    )
-    query_emb = resp.data[0].embedding
-    embed_ms = (time.time() - t0) * 1000
-
     has_threshold = cfg.search_threshold > 0
     retrieve_k = (top_k * 5) if has_filters else (top_k * 3)
 
-    t0 = time.time()
-    vec_rows = conn.execute(
-        "SELECT chunk_id, distance, chunk_text, doc_path, heading "
-        "FROM vec_chunks WHERE embedding MATCH ? AND k = ? ORDER BY distance",
-        (serialize_f32(query_emb), retrieve_k),
-    ).fetchall()
-    vec_results = [
-        (r["chunk_id"], r["distance"], r["chunk_text"], r["doc_path"], r["heading"])
-        for r in vec_rows
-    ]
-    vec_ms = (time.time() - t0) * 1000
+    if cfg.query_expand:
+        expansions, expand_ms = expand_query(client, clean_query, cfg)
+        lex_exps = [e for e in expansions if e["type"] == "lex"]
+        vec_exps = [e for e in expansions if e["type"] == "vec"]
 
-    t0 = time.time()
-    fts_q = fts_escape(clean_query)
-    fts_results = []
-    if fts_q:
-        try:
-            fts_rows = conn.execute(
-                "SELECT rowid, rank FROM fts_chunks WHERE fts_chunks MATCH ? ORDER BY rank LIMIT ?",
-                (fts_q, retrieve_k),
-            ).fetchall()
-            fts_results = [(r["rowid"], r["rank"]) for r in fts_rows]
-        except sqlite3.OperationalError:
-            pass
-    fts_ms = (time.time() - t0) * 1000
+        # Batch embed: primary + all vec expansions (single API call)
+        t0 = time.time()
+        all_vec_texts = [embed_input] + [e["text"] for e in vec_exps]
+        all_embeddings = embed_batch(client, all_vec_texts, cfg)
+        embed_ms = (time.time() - t0) * 1000
 
-    fuse_k = retrieve_k if has_filters else top_k
-    results = rrf_fuse(vec_results, fts_results, fuse_k, cfg)
-    fill_fts_only_results(conn, results)
+        # Run all queries
+        t0 = time.time()
+        primary_vec = run_vec_query(conn, serialize_f32(all_embeddings[0]), retrieve_k)
+        exp_vec = [
+            run_vec_query(conn, serialize_f32(emb), retrieve_k)
+            for emb in all_embeddings[1:]
+        ]
+        vec_ms = (time.time() - t0) * 1000
+
+        t0 = time.time()
+        primary_fts = run_fts_query(conn, clean_query, retrieve_k)
+        exp_fts = [run_fts_query(conn, e["text"], retrieve_k) for e in lex_exps]
+        fts_ms = (time.time() - t0) * 1000
+
+        # Normalize and fuse all lists
+        all_lists = [
+            normalize_vec_list(primary_vec),
+            normalize_fts_list(primary_fts),
+        ]
+        all_lists += [normalize_vec_list(r) for r in exp_vec]
+        all_lists += [normalize_fts_list(r) for r in exp_fts]
+        weights = [2.0, 2.0] + [1.0] * (len(all_lists) - 2)
+
+        fuse_k = retrieve_k if has_filters else top_k
+        results = multi_rrf_fuse(all_lists, weights, fuse_k, cfg.rrf_k)
+        fill_fts_only_results(conn, results)
+
+        vec_count = len(primary_vec)
+        fts_count = len(primary_fts)
+    else:
+        t0 = time.time()
+        resp = client.embeddings.create(
+            model=cfg.embed_model, input=[embed_input], dimensions=cfg.embed_dims
+        )
+        query_emb = resp.data[0].embedding
+        embed_ms = (time.time() - t0) * 1000
+
+        t0 = time.time()
+        vec_rows = conn.execute(
+            "SELECT chunk_id, distance, chunk_text, doc_path, heading "
+            "FROM vec_chunks WHERE embedding MATCH ? AND k = ? ORDER BY distance",
+            (serialize_f32(query_emb), retrieve_k),
+        ).fetchall()
+        vec_results = [
+            (
+                r["chunk_id"],
+                r["distance"],
+                r["chunk_text"],
+                r["doc_path"],
+                r["heading"],
+            )
+            for r in vec_rows
+        ]
+        vec_ms = (time.time() - t0) * 1000
+
+        t0 = time.time()
+        fts_q = fts_escape(clean_query)
+        fts_results: list[tuple] = []
+        if fts_q:
+            try:
+                fts_rows = conn.execute(
+                    "SELECT rowid, rank FROM fts_chunks WHERE fts_chunks MATCH ? ORDER BY rank LIMIT ?",
+                    (fts_q, retrieve_k),
+                ).fetchall()
+                fts_results = [(r["rowid"], r["rank"]) for r in fts_rows]
+            except sqlite3.OperationalError:
+                pass
+        fts_ms = (time.time() - t0) * 1000
+
+        fuse_k = retrieve_k if has_filters else top_k
+        results = rrf_fuse(vec_results, fts_results, fuse_k, cfg)
+        fill_fts_only_results(conn, results)
+
+        vec_count = len(vec_results)
+        fts_count = len(fts_results)
 
     if has_filters:
         results = apply_filters(results, filters, conn)
@@ -173,18 +225,22 @@ def search_core(
 
     conn.close()
 
-    return {
+    timing = {
+        "hyde": round(hyde_ms),
+        "embed": round(embed_ms),
+        "vec": round(vec_ms),
+        "fts": round(fts_ms),
+    }
+    if cfg.query_expand:
+        timing["expand"] = round(expand_ms)
+
+    out: dict = {
         "query": clean_query,
         "filters": {k: v for k, v in filters.items() if v} if has_filters else {},
-        "timing_ms": {
-            "hyde": round(hyde_ms),
-            "embed": round(embed_ms),
-            "vec": round(vec_ms),
-            "fts": round(fts_ms),
-        },
+        "timing_ms": timing,
         "candidates": {
-            "vec": len(vec_results),
-            "fts": len(fts_results),
+            "vec": vec_count,
+            "fts": fts_count,
             "fused": len(results),
         },
         "results": [
@@ -201,6 +257,10 @@ def search_core(
             for i, r in enumerate(results)
         ],
     }
+    if cfg.query_expand:
+        out["expanded"] = bool(expansions)
+        out["expansions"] = expansions
+    return out
 
 
 def fts_core(
@@ -316,6 +376,8 @@ def ask_core(
 
     rerank_info = None
     hyde_ms = 0.0
+    expand_ms = 0.0
+    expansions: list[dict] = []
 
     if bm25_shortcut:
         t0 = time.time()
@@ -349,49 +411,85 @@ def ask_core(
     else:
         embed_input = clean_question
         if cfg.hyde_enabled:
-            hyde_passage, hyde_ms = generate_hyde_passage(
-                clean_question, client, cfg
-            )
+            hyde_passage, hyde_ms = generate_hyde_passage(clean_question, client, cfg)
             if hyde_passage:
                 embed_input = hyde_passage
 
-        t0 = time.time()
-        resp = client.embeddings.create(
-            model=cfg.embed_model, input=[embed_input], dimensions=cfg.embed_dims
-        )
-        query_emb = resp.data[0].embedding
-        embed_ms = (time.time() - t0) * 1000
-
         retrieve_k = max(cfg.rerank_fetch_k, top_k * 3)
 
-        t0 = time.time()
-        vec_rows = conn.execute(
-            "SELECT chunk_id, distance, chunk_text, doc_path, heading "
-            "FROM vec_chunks WHERE embedding MATCH ? AND k = ? ORDER BY distance",
-            (serialize_f32(query_emb), retrieve_k),
-        ).fetchall()
-        vec_results = [
-            (r["chunk_id"], r["distance"], r["chunk_text"], r["doc_path"], r["heading"])
-            for r in vec_rows
-        ]
-        vec_ms = (time.time() - t0) * 1000
+        if cfg.query_expand:
+            expansions, expand_ms = expand_query(client, clean_question, cfg)
+            lex_exps = [e for e in expansions if e["type"] == "lex"]
+            vec_exps = [e for e in expansions if e["type"] == "vec"]
 
-        t0 = time.time()
-        fts_results = []
-        if fts_q:
-            try:
-                fts_rows = conn.execute(
-                    "SELECT rowid, rank FROM fts_chunks WHERE fts_chunks MATCH ? ORDER BY rank LIMIT ?",
-                    (fts_q, retrieve_k),
-                ).fetchall()
-                fts_results = [(r["rowid"], r["rank"]) for r in fts_rows]
-            except sqlite3.OperationalError:
-                pass
-        fts_ms = (time.time() - t0) * 1000
-        search_ms = vec_ms + fts_ms
+            t0 = time.time()
+            all_vec_texts = [embed_input] + [e["text"] for e in vec_exps]
+            all_embeddings = embed_batch(client, all_vec_texts, cfg)
+            embed_ms = (time.time() - t0) * 1000
 
-        results = rrf_fuse(vec_results, fts_results, cfg.rerank_fetch_k, cfg)
-        fill_fts_only_results(conn, results)
+            t0 = time.time()
+            primary_vec = run_vec_query(
+                conn, serialize_f32(all_embeddings[0]), retrieve_k
+            )
+            exp_vec = [
+                run_vec_query(conn, serialize_f32(emb), retrieve_k)
+                for emb in all_embeddings[1:]
+            ]
+            primary_fts = run_fts_query(conn, clean_question, retrieve_k)
+            exp_fts = [run_fts_query(conn, e["text"], retrieve_k) for e in lex_exps]
+            search_ms = (time.time() - t0) * 1000
+
+            all_lists = [
+                normalize_vec_list(primary_vec),
+                normalize_fts_list(primary_fts),
+            ]
+            all_lists += [normalize_vec_list(r) for r in exp_vec]
+            all_lists += [normalize_fts_list(r) for r in exp_fts]
+            weights = [2.0, 2.0] + [1.0] * (len(all_lists) - 2)
+
+            results = multi_rrf_fuse(all_lists, weights, cfg.rerank_fetch_k, cfg.rrf_k)
+            fill_fts_only_results(conn, results)
+        else:
+            t0 = time.time()
+            resp = client.embeddings.create(
+                model=cfg.embed_model,
+                input=[embed_input],
+                dimensions=cfg.embed_dims,
+            )
+            query_emb = resp.data[0].embedding
+            embed_ms = (time.time() - t0) * 1000
+
+            t0 = time.time()
+            vec_rows = conn.execute(
+                "SELECT chunk_id, distance, chunk_text, doc_path, heading "
+                "FROM vec_chunks WHERE embedding MATCH ? AND k = ? ORDER BY distance",
+                (serialize_f32(query_emb), retrieve_k),
+            ).fetchall()
+            vec_results = [
+                (
+                    r["chunk_id"],
+                    r["distance"],
+                    r["chunk_text"],
+                    r["doc_path"],
+                    r["heading"],
+                )
+                for r in vec_rows
+            ]
+
+            fts_results_ask: list[tuple] = []
+            if fts_q:
+                try:
+                    fts_rows = conn.execute(
+                        "SELECT rowid, rank FROM fts_chunks WHERE fts_chunks MATCH ? ORDER BY rank LIMIT ?",
+                        (fts_q, retrieve_k),
+                    ).fetchall()
+                    fts_results_ask = [(r["rowid"], r["rank"]) for r in fts_rows]
+                except sqlite3.OperationalError:
+                    pass
+            search_ms = (time.time() - t0) * 1000
+
+            results = rrf_fuse(vec_results, fts_results_ask, cfg.rerank_fetch_k, cfg)
+            fill_fts_only_results(conn, results)
 
         if has_filters:
             results = apply_filters(results, filters, conn)
@@ -407,24 +505,32 @@ def ask_core(
 
     active_filters = {k: v for k, v in filters.items() if v} if has_filters else {}
 
+    timing = {
+        "hyde": round(hyde_ms),
+        "embed": round(embed_ms),
+        "search": round(search_ms),
+        "generate": 0,
+    }
+    if cfg.query_expand:
+        timing["expand"] = round(expand_ms)
+
     if not filtered:
         conn.close()
-        return {
+        out: dict = {
             "question": clean_question,
             "filters": active_filters,
             "answer": None,
             "model": cfg.chat_model,
             "bm25_shortcut": bm25_shortcut,
             "rerank": rerank_info,
-            "timing_ms": {
-                "hyde": round(hyde_ms),
-                "embed": round(embed_ms),
-                "search": round(search_ms),
-                "generate": 0,
-            },
+            "timing_ms": timing,
             "tokens": {"prompt": 0, "completion": 0},
             "sources": [],
         }
+        if cfg.query_expand:
+            out["expanded"] = bool(expansions)
+            out["expansions"] = expansions
+        return out
 
     context_parts = []
     source_entries = []
@@ -479,19 +585,16 @@ def ask_core(
 
     conn.close()
 
-    return {
+    timing["generate"] = round(gen_ms)
+
+    out = {
         "question": clean_question,
         "filters": active_filters,
         "answer": answer,
         "model": cfg.chat_model,
         "bm25_shortcut": bm25_shortcut,
         "rerank": rerank_info,
-        "timing_ms": {
-            "hyde": round(hyde_ms),
-            "embed": round(embed_ms),
-            "search": round(search_ms),
-            "generate": round(gen_ms),
-        },
+        "timing_ms": timing,
         "tokens": {
             "prompt": tokens.prompt_tokens,
             "completion": tokens.completion_tokens,
@@ -503,6 +606,10 @@ def ask_core(
         "result_count": len(results),
         "filtered_count": len(filtered),
     }
+    if cfg.query_expand:
+        out["expanded"] = bool(expansions)
+        out["expansions"] = expansions
+    return out
 
 
 def similar_core(file_arg: str, cfg: Config, top_k: int = 10) -> dict:

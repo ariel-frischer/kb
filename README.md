@@ -8,6 +8,7 @@ CLI RAG tool for your docs. Index 30+ document formats (markdown, PDF, DOCX, EPU
 ## Features
 
 - **Hybrid search** — vector similarity + FTS5 keyword search, fused with Reciprocal Rank Fusion (with rank bonuses)
+- **HyDE** — generates a hypothetical answer passage via LLM before vector search, improving retrieval for question-style queries (enabled by default, FTS still uses original query)
 - **Keyword-only search** — `kb fts` for instant BM25 results with zero API cost (filepath matches weighted 10x, headings 2x)
 - **Heading-aware chunking** — markdown split by heading hierarchy, each chunk carries ancestry
 - **Incremental indexing** — content-hash per chunk, only re-embeds changes
@@ -139,6 +140,8 @@ sources = [
 # rerank_top_k = 5
 # rerank_method = "llm"     # "llm" (RankGPT) or "cross-encoder" (local, no API cost)
 # cross_encoder_model = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+# hyde_enabled = true       # generate hypothetical passage before vector search
+# hyde_model = ""           # LLM for HyDE ("" = use chat_model)
 # index_code = false       # set true to also index source code files
 ```
 
@@ -255,11 +258,12 @@ kb index
 
 kb search "query"
   1. Parse filters, strip from query
-  2. Embed clean query
-  3. Vector search (vec0 MATCH) + FTS5 keyword search
-  4. Fuse with RRF (rank bonuses for top positions)
-  5. Apply filters
-  6. Display results
+  2. HyDE: generate hypothetical answer passage via LLM (if enabled)
+  3. Embed passage (or raw query if HyDE disabled/failed)
+  4. Vector search (vec0 MATCH) + FTS5 keyword search (original query)
+  5. Fuse with RRF (rank bonuses for top positions)
+  6. Apply filters
+  7. Display results
 
 kb fts "query"
   1. Parse filters, strip from query
@@ -269,12 +273,13 @@ kb fts "query"
   5. Display results (instant, zero API cost)
 
 kb ask "question"
-  1. BM25 probe — if top FTS hit is high-confidence, skip to step 5
-  2. Same as search, but over-fetch 20
-  3. Apply filters
-  4. Rerank -> top 5 (cross-encoder or LLM)
-  5. Confidence threshold
-  6. LLM generates answer from context
+  1. BM25 probe — if top FTS hit is high-confidence, skip to step 6
+  2. HyDE: generate hypothetical answer passage via LLM (if enabled)
+  3. Same as search, but over-fetch 20
+  4. Apply filters
+  5. Rerank -> top 5 (cross-encoder or LLM)
+  6. Confidence threshold
+  7. LLM generates answer from context
 ```
 
 ## MCP Server

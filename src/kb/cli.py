@@ -5,6 +5,7 @@ import io
 import json
 import re
 import sys
+from copy import copy
 from pathlib import Path
 
 from .api import (
@@ -50,9 +51,9 @@ Usage:
   kb sources                     List configured sources
   kb index [DIR...] [--no-size-limit]  Index sources (skip files > max_file_size_mb)
   kb allow <file>                Whitelist a large file for indexing
-  kb search "query" [k] [--threshold N] [--json|--csv|--md]  Hybrid semantic + keyword search (default k=5)
+  kb search "query" [k] [--threshold N] [--expand] [--json|--csv|--md]  Hybrid search (default k=5)
   kb fts "query" [k] [--json|--csv|--md]          Keyword-only search (no embedding, instant)
-  kb ask "question" [k] [--threshold N] [--json|--csv|--md]   RAG: search + rerank + answer (default k=8)
+  kb ask "question" [k] [--threshold N] [--expand] [--json|--csv|--md]  RAG: search + answer (default k=8)
   kb similar <file> [k]          Find similar documents (no API call, default k=10)
   kb tag <file> tag1 [tag2...]   Add tags to a document
   kb untag <file> tag1 [tag2...]  Remove tags from a document
@@ -331,12 +332,25 @@ def cmd_search(
 
     print(f'Query: "{clean_query}"')
     hyde_tag = f"HyDE: {timing['hyde']}ms | " if timing.get("hyde") else ""
+    expand_tag = f"Expand: {timing['expand']}ms | " if timing.get("expand") else ""
     print(
-        f"{hyde_tag}Embed: {timing['embed']}ms | Vec: {timing['vec']}ms | FTS: {timing['fts']}ms"
+        f"{hyde_tag}{expand_tag}Embed: {timing['embed']}ms | Vec: {timing['vec']}ms | FTS: {timing['fts']}ms"
     )
     print(
-        f"Candidates: {candidates['vec']} vec, {candidates['fts']} fts -> {candidates['fused']} fused\n"
+        f"Candidates: {candidates['vec']} vec, {candidates['fts']} fts -> {candidates['fused']} fused"
     )
+
+    if result.get("expansions"):
+        lex = [e["text"] for e in result["expansions"] if e["type"] == "lex"]
+        vec = [e["text"] for e in result["expansions"] if e["type"] == "vec"]
+        parts = []
+        if lex:
+            parts.append(f"lex{lex}")
+        if vec:
+            parts.append(f"vec{vec}")
+        print(f"Expansions: {' '.join(parts)}")
+
+    print()
 
     for r in result["results"]:
         sim = (
@@ -429,6 +443,9 @@ def cmd_ask(
             "tokens": result["tokens"],
             "sources": result["sources"],
         }
+        if "expansions" in result:
+            out["expanded"] = result.get("expanded", False)
+            out["expansions"] = result["expansions"]
         print(json.dumps(out, ensure_ascii=False))
         return
 
@@ -457,10 +474,21 @@ def cmd_ask(
 
     shortcut_tag = " (bm25 shortcut)" if bm25_shortcut else ""
     hyde_tag = f"hyde: {timing['hyde']}ms | " if timing.get("hyde") else ""
+    expand_tag = f"expand: {timing['expand']}ms | " if timing.get("expand") else ""
     print(f"Q: {clean_question}")
     print(
-        f"({hyde_tag}embed: {timing['embed']}ms | search: {timing['search']}ms | generate: {timing['generate']}ms{shortcut_tag})"
+        f"({hyde_tag}{expand_tag}embed: {timing['embed']}ms | search: {timing['search']}ms | generate: {timing['generate']}ms{shortcut_tag})"
     )
+
+    if result.get("expansions"):
+        lex = [e["text"] for e in result["expansions"] if e["type"] == "lex"]
+        vec = [e["text"] for e in result["expansions"] if e["type"] == "vec"]
+        parts = []
+        if lex:
+            parts.append(f"lex{lex}")
+        if vec:
+            parts.append(f"vec{vec}")
+        print(f"(expansions: {' '.join(parts)})")
 
     if result["answer"] is None:
         print("\nNo relevant documents found.")
@@ -745,7 +773,7 @@ _kb() {{
         COMPREPLY=( $(compgen -W "--project" -- "$cur") )
         ;;
       search|ask)
-        COMPREPLY=( $(compgen -W "--threshold --json --csv --md" -- "$cur") )
+        COMPREPLY=( $(compgen -W "--threshold --expand --no-expand --json --csv --md" -- "$cur") )
         ;;
       fts)
         COMPREPLY=( $(compgen -W "--json --csv --md" -- "$cur") )
@@ -769,7 +797,7 @@ complete -F _kb kb"""
         print("complete -c kb -n '__fish_seen_subcommand_from init' -a '--project'")
         print(
             "complete -c kb -n '__fish_seen_subcommand_from search ask' "
-            "-a '--threshold --json --csv --md'"
+            "-a '--threshold --expand --no-expand --json --csv --md'"
         )
         print(
             "complete -c kb -n '__fish_seen_subcommand_from fts' -a '--json --csv --md'"
@@ -880,11 +908,21 @@ def main():
         cmd_index(cfg, args[1:])
     elif cmd == "search":
         if len(args) < 2 or sub_help:
-            print('Usage: kb search "query" [k] [--threshold N] [--json|--csv|--md]')
+            print(
+                'Usage: kb search "query" [k] [--threshold N] [--expand] [--json|--csv|--md]'
+            )
             sys.exit(0 if sub_help else 1)
         threshold = None
         search_args = list(args[1:])
         out_fmt = _parse_output_format(search_args)
+        if "--expand" in search_args:
+            search_args.remove("--expand")
+            cfg = copy(cfg)
+            cfg.query_expand = True
+        elif "--no-expand" in search_args:
+            search_args.remove("--no-expand")
+            cfg = copy(cfg)
+            cfg.query_expand = False
         if "--threshold" in search_args:
             ti = search_args.index("--threshold")
             if ti + 1 < len(search_args):
@@ -907,11 +945,21 @@ def main():
         cmd_fts(fts_args[0], cfg, top_k, output_format=out_fmt)
     elif cmd == "ask":
         if len(args) < 2 or sub_help:
-            print('Usage: kb ask "question" [k] [--threshold N] [--json|--csv|--md]')
+            print(
+                'Usage: kb ask "question" [k] [--threshold N] [--expand] [--json|--csv|--md]'
+            )
             sys.exit(0 if sub_help else 1)
         threshold = None
         ask_args = list(args[1:])
         out_fmt = _parse_output_format(ask_args)
+        if "--expand" in ask_args:
+            ask_args.remove("--expand")
+            cfg = copy(cfg)
+            cfg.query_expand = True
+        elif "--no-expand" in ask_args:
+            ask_args.remove("--no-expand")
+            cfg = copy(cfg)
+            cfg.query_expand = False
         if "--threshold" in ask_args:
             ti = ask_args.index("--threshold")
             if ti + 1 < len(ask_args):

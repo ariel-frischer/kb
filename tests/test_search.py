@@ -1,9 +1,16 @@
-"""Tests for kb.search — FTS escape, RRF fusion, backfill."""
+"""Tests for kb.search — FTS escape, RRF fusion, multi-RRF fusion, backfill."""
 
 import pytest
 
 from kb.config import Config
-from kb.search import fill_fts_only_results, fts_escape, rrf_fuse
+from kb.search import (
+    fill_fts_only_results,
+    fts_escape,
+    multi_rrf_fuse,
+    normalize_fts_list,
+    normalize_vec_list,
+    rrf_fuse,
+)
 
 
 class TestFtsEscape:
@@ -158,3 +165,162 @@ class TestFillFtsOnlyResults:
         ]
         fill_fts_only_results(db_conn, results)
         assert results[0]["text"] == "already here"
+
+
+class TestNormalizeHelpers:
+    def test_normalize_vec_list(self):
+        vec = [(10, 0.2, "text a", "a.md", "H1"), (20, 0.5, "text b", "b.md", "H2")]
+        result = normalize_vec_list(vec)
+        assert len(result) == 2
+        assert result[0]["chunk_id"] == 10
+        assert result[0]["score"] == pytest.approx(0.8)
+        assert result[0]["distance"] == 0.2
+        assert result[0]["text"] == "text a"
+        assert result[1]["score"] == pytest.approx(0.5)
+
+    def test_normalize_fts_list(self):
+        fts = [(10, -1.5), (20, -3.0)]
+        result = normalize_fts_list(fts)
+        assert len(result) == 2
+        assert result[0]["chunk_id"] == 10
+        assert result[0]["score"] == pytest.approx(1.5 / 2.5)
+        assert result[0]["fts_rank"] == -1.5
+        assert result[1]["score"] == pytest.approx(3.0 / 4.0)
+
+
+class TestMultiRrfFuse:
+    def test_single_list(self):
+        items = [
+            {
+                "chunk_id": 10,
+                "score": 0.8,
+                "distance": 0.2,
+                "text": "a",
+                "doc_path": "a.md",
+                "heading": "H",
+            },
+        ]
+        results = multi_rrf_fuse([items], [1.0], top_k=5, rrf_k=60.0)
+        assert len(results) == 1
+        assert results[0]["chunk_id"] == 10
+        # score = 1.0 * 0.8 / (60 + 0) + rank_bonus(0) = 0.8/60 + 0.05
+        assert results[0]["rrf_score"] == pytest.approx(0.8 / 60.0 + 0.05)
+        assert results[0]["in_vec"] is True
+
+    def test_two_lists_with_weights(self):
+        vec_list = [
+            {
+                "chunk_id": 1,
+                "score": 0.9,
+                "distance": 0.1,
+                "text": "t",
+                "doc_path": "a.md",
+                "heading": "H",
+            },
+        ]
+        fts_list = [
+            {"chunk_id": 2, "score": 0.7, "fts_rank": -2.0},
+        ]
+        results = multi_rrf_fuse([vec_list, fts_list], [2.0, 1.0], top_k=5, rrf_k=60.0)
+        assert len(results) == 2
+        # chunk 1: 2.0 * 0.9 / 60 + 0.05 = 0.03 + 0.05
+        # chunk 2: 1.0 * 0.7 / 60 + 0.05
+        scores = {r["chunk_id"]: r["rrf_score"] for r in results}
+        assert scores[1] == pytest.approx(2.0 * 0.9 / 60.0 + 0.05)
+        assert scores[2] == pytest.approx(1.0 * 0.7 / 60.0 + 0.05)
+
+    def test_overlap_across_lists(self):
+        list1 = [
+            {
+                "chunk_id": 1,
+                "score": 0.8,
+                "distance": 0.2,
+                "text": "t",
+                "doc_path": "a.md",
+                "heading": "H",
+            },
+        ]
+        list2 = [
+            {"chunk_id": 1, "score": 0.6, "fts_rank": -1.5},
+        ]
+        results = multi_rrf_fuse([list1, list2], [2.0, 2.0], top_k=5, rrf_k=60.0)
+        assert len(results) == 1
+        # Both contributions at rank 0: 2.0*0.8/60 + 2.0*0.6/60 + bonus(0)
+        expected = 2.0 * 0.8 / 60.0 + 2.0 * 0.6 / 60.0 + 0.05
+        assert results[0]["rrf_score"] == pytest.approx(expected)
+        assert results[0]["in_vec"] is True
+        assert results[0]["in_fts"] is True
+
+    def test_rank_bonus_applied(self):
+        # chunk at rank 0 should have higher bonus than chunk at rank 3
+        items = [
+            {
+                "chunk_id": i,
+                "score": 0.5,
+                "distance": 0.5,
+                "text": "t",
+                "doc_path": "a.md",
+                "heading": "H",
+            }
+            for i in range(5)
+        ]
+        results = multi_rrf_fuse([items], [1.0], top_k=5, rrf_k=60.0)
+        # rank 0 chunk gets +0.05, rank 1 gets +0.02, rank 3 gets 0
+        assert results[0]["rrf_score"] > results[2]["rrf_score"]
+        assert results[2]["rrf_score"] > results[3]["rrf_score"]
+
+    def test_top_k_limits(self):
+        items = [
+            {
+                "chunk_id": i,
+                "score": 0.5,
+                "distance": 0.5,
+                "text": "t",
+                "doc_path": "a.md",
+                "heading": "H",
+            }
+            for i in range(10)
+        ]
+        results = multi_rrf_fuse([items], [1.0], top_k=3, rrf_k=60.0)
+        assert len(results) == 3
+
+    def test_backward_compat_format(self):
+        vec_list = [
+            {
+                "chunk_id": 1,
+                "score": 0.8,
+                "distance": 0.2,
+                "text": "txt",
+                "doc_path": "a.md",
+                "heading": "H1",
+            },
+        ]
+        fts_list = [
+            {"chunk_id": 2, "score": 0.6, "fts_rank": -1.5},
+        ]
+        results = multi_rrf_fuse([vec_list, fts_list], [1.0, 1.0], top_k=5, rrf_k=60.0)
+        for r in results:
+            assert "chunk_id" in r
+            assert "rrf_score" in r
+            assert "distance" in r
+            assert "similarity" in r
+            assert "fts_rank" in r
+            assert "text" in r
+            assert "doc_path" in r
+            assert "heading" in r
+            assert "in_fts" in r
+            assert "in_vec" in r
+
+        # Vec-sourced chunk
+        vec_r = next(r for r in results if r["chunk_id"] == 1)
+        assert vec_r["distance"] == 0.2
+        assert vec_r["similarity"] == pytest.approx(0.8)
+        assert vec_r["in_vec"] is True
+        assert vec_r["text"] == "txt"
+
+        # FTS-sourced chunk
+        fts_r = next(r for r in results if r["chunk_id"] == 2)
+        assert fts_r["distance"] is None
+        assert fts_r["similarity"] is None
+        assert fts_r["in_fts"] is True
+        assert fts_r["in_vec"] is False

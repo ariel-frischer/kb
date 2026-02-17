@@ -19,7 +19,7 @@ log = logging.getLogger(__name__)
 _expand_model_cache: dict[str, tuple] = {}
 
 _LLM_PROMPT = """\
-Generate search query expansions. Return JSON: {"lex": ["keyword variant 1", ...], "vec": ["semantic rephrasing 1", ...]}
+Generate search query expansions. Return JSON: {{"lex": ["keyword variant 1", ...], "vec": ["semantic rephrasing 1", ...]}}
 Rules:
 - lex: 2-3 short keyword alternatives (synonyms, related terms)
 - vec: 1-2 natural language rephrasings (different wording, same intent)
@@ -28,9 +28,7 @@ Query: "{query}"\
 """
 
 
-def expand_query(
-    client: OpenAI, query: str, cfg: Config
-) -> tuple[list[dict], float]:
+def expand_query(client: OpenAI, query: str, cfg: Config) -> tuple[list[dict], float]:
     """Dispatch to configured method. Returns ([{"type": "lex"|"vec", "text": "..."}], elapsed_ms)."""
     t0 = time.time()
     if cfg.expand_method == "llm":

@@ -2,6 +2,8 @@ releases:
   - version: "unreleased"
     date: null
     added:
+      - description: "HyDE (Hypothetical Document Embeddings) — generates a hypothetical answer passage via LLM before vector search for improved retrieval on question-style queries"
+        commits: ["59fadc9", "a00068b"]
       - description: "FTS-only keyword search command (`kb fts`) for fast, no-API searches"
         commits: ["2bfe417"]
       - description: "Positional rank bonuses in RRF fusion scoring"

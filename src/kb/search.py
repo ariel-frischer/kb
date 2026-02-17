@@ -86,9 +86,7 @@ def rrf_fuse(
     return results
 
 
-def run_vec_query(
-    conn: sqlite3.Connection, emb_bytes: bytes, k: int
-) -> list[tuple]:
+def run_vec_query(conn: sqlite3.Connection, emb_bytes: bytes, k: int) -> list[tuple]:
     """Execute vec0 KNN search. Returns list of (chunk_id, distance, text, doc_path, heading)."""
     rows = conn.execute(
         "SELECT chunk_id, distance, chunk_text, doc_path, heading "
@@ -101,9 +99,7 @@ def run_vec_query(
     ]
 
 
-def run_fts_query(
-    conn: sqlite3.Connection, query_str: str, limit: int
-) -> list[tuple]:
+def run_fts_query(conn: sqlite3.Connection, query_str: str, limit: int) -> list[tuple]:
     """Execute FTS5 search. Returns list of (chunk_id, fts_rank). Returns [] if no terms."""
     fts_q = fts_escape(query_str)
     if not fts_q:

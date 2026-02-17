@@ -39,6 +39,7 @@ src/kb/
 ├── chunk.py       — Markdown + plain text chunking (chonkie or regex fallback)
 ├── embed.py       — OpenAI embedding helpers, batching, serialize/deserialize for sqlite-vec
 ├── extract.py     — Text extraction registry for 30+ formats (PDF, DOCX, EPUB, HTML, ODT, etc.)
+├── hyde.py        — HyDE: generates hypothetical answer passage via LLM for better vector retrieval
 ├── search.py      — Hybrid search (vector + FTS5), RRF fusion
 ├── rerank.py      — Reranking: local cross-encoder (sentence-transformers) or LLM (RankGPT)
 ├── filters.py     — Pre-search filter parsing + application (file:, type:, tag:, dt>, dt<, +"kw", -"kw")
@@ -49,9 +50,9 @@ src/kb/
 
 **Indexing** (`kb index`): find files by extension → extract text (format-specific) → chunking → content-hash diff → embed new chunks → store in sqlite-vec (vec0) + FTS5
 
-**Search** (`kb search`): query → parse filters → embed → vector search + FTS5 → RRF fusion → apply filters → results
+**Search** (`kb search`): query → parse filters → [HyDE] → embed (passage or query) → vector search + FTS5 (original query) → RRF fusion → apply filters → results
 
-**Ask** (`kb ask`): same as search but over-fetches → reranks top candidates (cross-encoder or LLM) → confidence threshold → LLM generates answer from context
+**Ask** (`kb ask`): BM25 probe → if shortcut: FTS only; else: [HyDE] → embed → vec+fts → RRF → rerank (cross-encoder or LLM) → confidence threshold → LLM generates answer from context
 
 **Similar** (`kb similar`): read chunk embeddings from vec0 → average into doc vector → KNN query → filter self → aggregate by doc → rank by similarity
 
@@ -60,6 +61,7 @@ src/kb/
 - **sqlite-vec `vec0` virtual table** — stores embeddings + text in auxiliary columns, avoiding JOINs at search time
 - **Reciprocal Rank Fusion** — combines vector and keyword rankings without needing score normalization
 - **FTS5 field weighting** — `doc_path` (10x), `heading` (2x), `text` (1x) via BM25 rank config; filepath matches strongly boost relevance
+- **HyDE (Hypothetical Document Embeddings)** — LLM generates a hypothetical answer passage before vector search, improving retrieval for question-style queries. FTS still uses original query. Graceful fallback on failure.
 - **Content-hash per chunk** — incremental indexing only re-embeds changed content
 - **Config walks up from cwd** — like `.gitignore`, so `kb` works from any subdirectory
 - **Tags** — comma-separated in `documents.tags` column; auto-parsed from markdown YAML frontmatter, manually managed via `kb tag`/`kb untag`

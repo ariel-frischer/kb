@@ -270,6 +270,11 @@ def connect(cfg: Config) -> sqlite3.Connection:
 def reset(db_path: Path):
     if db_path.exists():
         db_path.unlink()
+        # Clean up WAL sidecar files
+        for suffix in ("-shm", "-wal"):
+            sidecar = db_path.parent / (db_path.name + suffix)
+            if sidecar.exists():
+                sidecar.unlink()
         print(f"Deleted {db_path}")
     else:
         print("No database to reset.")

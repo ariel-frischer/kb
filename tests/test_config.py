@@ -5,8 +5,10 @@ from pathlib import Path
 
 
 from kb.config import (
+    GLOBAL_DATA_DIR,
     Config,
     _load_toml,
+    _project_db_path,
     _to_toml,
     find_config,
     load_secrets,
@@ -115,8 +117,27 @@ class TestLoadSecrets:
         load_secrets()  # should not raise
 
 
+class TestProjectDbPath:
+    def test_deterministic(self, tmp_path):
+        path1 = _project_db_path(tmp_path)
+        path2 = _project_db_path(tmp_path)
+        assert path1 == path2
+
+    def test_different_dirs_get_different_paths(self, tmp_path):
+        dir_a = tmp_path / "project_a"
+        dir_b = tmp_path / "project_b"
+        dir_a.mkdir()
+        dir_b.mkdir()
+        assert _project_db_path(dir_a) != _project_db_path(dir_b)
+
+    def test_path_under_xdg_data_dir(self, tmp_path):
+        path = _project_db_path(tmp_path)
+        assert str(path).startswith(str(GLOBAL_DATA_DIR / "projects"))
+        assert path.name == "kb.db"
+
+
 class TestLoadToml:
-    def test_loads_project_config(self, tmp_path):
+    def test_loads_project_config_explicit_db(self, tmp_path):
         cfg_path = tmp_path / ".kb.toml"
         cfg_path.write_text(
             'db = "my.db"\nsources = ["docs/"]\nembed_model = "custom-model"\n'
@@ -127,7 +148,15 @@ class TestLoadToml:
         assert cfg.embed_model == "custom-model"
         assert cfg.scope == "project"
         assert cfg.config_dir == tmp_path
+        # Explicit db -> resolved relative to config dir
         assert cfg.db_path == tmp_path / "my.db"
+
+    def test_loads_project_config_no_db(self, tmp_path):
+        cfg_path = tmp_path / ".kb.toml"
+        cfg_path.write_text('sources = ["docs/"]\n')
+        cfg = _load_toml(cfg_path, "project")
+        # No explicit db -> XDG data dir
+        assert cfg.db_path == _project_db_path(tmp_path)
 
     def test_loads_global_config(self, tmp_path, monkeypatch):
         from kb.config import GLOBAL_DB_PATH
@@ -179,6 +208,8 @@ class TestFindConfig:
         cfg = find_config()
         assert cfg.config_path is None
         assert cfg.scope == "project"
+        # No config -> DB in XDG data dir based on cwd
+        assert cfg.db_path == _project_db_path(tmp_path)
 
 
 class TestToToml:

@@ -1,5 +1,6 @@
 """Configuration loading from .kb.toml / ~/.config/kb/config.toml and secrets."""
 
+import hashlib
 import os
 import tomllib
 from dataclasses import dataclass, field
@@ -17,9 +18,7 @@ GLOBAL_DB_PATH = GLOBAL_DATA_DIR / "kb.db"
 PROJECT_CONFIG_TEMPLATE = """\
 # Knowledge base config (project-local)
 # Run `kb init --project` to generate, `kb index` to index sources.
-
-# Where to store the database (relative to this file)
-db = ".kb/kb.db"
+# Database stored at ~/.local/share/kb/projects/<hash>/kb.db
 
 # Directories to index (relative to this file)
 sources = [
@@ -182,6 +181,16 @@ def load_secrets() -> None:
             os.environ[env_key] = str(value)
 
 
+def _project_db_path(config_dir: Path) -> Path:
+    """Compute a deterministic DB path under XDG data dir for a project.
+
+    Uses a short hash of the resolved config directory to create a unique
+    subdirectory: ~/.local/share/kb/projects/<hash12>/kb.db
+    """
+    slug = hashlib.sha256(str(config_dir.resolve()).encode()).hexdigest()[:12]
+    return GLOBAL_DATA_DIR / "projects" / slug / "kb.db"
+
+
 def _load_toml(cfg_path: Path, scope: str) -> Config:
     """Load a TOML config file and return a Config."""
     with open(cfg_path, "rb") as f:
@@ -192,8 +201,12 @@ def _load_toml(cfg_path: Path, scope: str) -> Config:
     cfg.config_path = cfg_path
     if scope == "global":
         cfg.db_path = GLOBAL_DB_PATH
-    else:
+    elif "db" in data:
+        # User explicitly set db path — resolve relative to config dir
         cfg.db_path = cfg_path.parent / cfg.db
+    else:
+        # No explicit db — use XDG data dir
+        cfg.db_path = _project_db_path(cfg_path.parent)
     return cfg
 
 
@@ -214,7 +227,7 @@ def find_config() -> Config:
 
     # 3. No config found — return defaults
     cfg = Config()
-    cfg.db_path = cwd / cfg.db
+    cfg.db_path = _project_db_path(cwd)
     return cfg
 
 

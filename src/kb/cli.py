@@ -29,6 +29,7 @@ from .config import (
     PROJECT_CONFIG_FILE,
     PROJECT_CONFIG_TEMPLATE,
     Config,
+    _project_db_path,
     find_config,
     load_secrets,
     save_config,
@@ -95,10 +96,8 @@ def cmd_init(project: bool):
             sys.exit(1)
         cfg_path.write_text(PROJECT_CONFIG_TEMPLATE)
         print(f"Created {cfg_path}")
-        kb_dir = Path.cwd() / ".kb"
-        kb_dir.mkdir(exist_ok=True)
-        (kb_dir / ".gitignore").write_text("*\n")
-        print(f"Created {kb_dir}/.gitignore")
+        db_path = _project_db_path(Path.cwd())
+        print(f"Database: {db_path}")
         print("Edit 'sources' to add directories to index, then run: kb index")
     else:
         if GLOBAL_CONFIG_FILE.exists():

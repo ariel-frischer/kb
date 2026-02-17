@@ -21,6 +21,7 @@ def connect(cfg: Config) -> sqlite3.Connection:
     conn.execute("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)")
     row = conn.execute("SELECT value FROM meta WHERE key = 'schema_version'").fetchone()
     current = int(row[0]) if row else 0
+    needs_fts_rebuild = False
 
     if current < SCHEMA_VERSION:
         if current == 6:
@@ -28,41 +29,74 @@ def connect(cfg: Config) -> sqlite3.Connection:
             print(
                 f"Schema upgrade v{current} -> v{SCHEMA_VERSION}, adding doc_path to FTS..."
             )
+            # Drop triggers first — UPDATE below would fire old fts_au trigger
+            for trigger in ("fts_ai", "fts_ad", "fts_au"):
+                conn.execute(f"DROP TRIGGER IF EXISTS {trigger}")
+            conn.execute("DROP TABLE IF EXISTS fts_chunks")
             try:
-                conn.execute(
-                    "ALTER TABLE chunks ADD COLUMN doc_path TEXT DEFAULT ''"
-                )
+                conn.execute("ALTER TABLE chunks ADD COLUMN doc_path TEXT DEFAULT ''")
             except sqlite3.OperationalError:
                 pass  # column already exists
             conn.execute(
                 "UPDATE chunks SET doc_path = "
                 "(SELECT path FROM documents WHERE id = chunks.doc_id)"
             )
-            for trigger in ("fts_ai", "fts_ad", "fts_au"):
-                conn.execute(f"DROP TRIGGER IF EXISTS {trigger}")
-            conn.execute("DROP TABLE IF EXISTS fts_chunks")
+            needs_fts_rebuild = True
         elif current == 5:
-            # Non-destructive: rebuild FTS with porter tokenizer
+            # Non-destructive: rebuild FTS with porter tokenizer + doc_path
             print(
                 f"Schema upgrade v{current} -> v{SCHEMA_VERSION}, rebuilding FTS with porter tokenizer..."
             )
+            for trigger in ("fts_ai", "fts_ad", "fts_au"):
+                conn.execute(f"DROP TRIGGER IF EXISTS {trigger}")
             conn.execute("DROP TABLE IF EXISTS fts_chunks")
+            try:
+                conn.execute("ALTER TABLE chunks ADD COLUMN doc_path TEXT DEFAULT ''")
+            except sqlite3.OperationalError:
+                pass
+            conn.execute(
+                "UPDATE chunks SET doc_path = "
+                "(SELECT path FROM documents WHERE id = chunks.doc_id)"
+            )
+            needs_fts_rebuild = True
         elif current == 4:
-            # Non-destructive: rebuild FTS with triggers + porter tokenizer
+            # Non-destructive: rebuild FTS with triggers + porter tokenizer + doc_path
             print(
                 f"Schema upgrade v{current} -> v{SCHEMA_VERSION}, rebuilding FTS with triggers..."
             )
+            for trigger in ("fts_ai", "fts_ad", "fts_au"):
+                conn.execute(f"DROP TRIGGER IF EXISTS {trigger}")
             conn.execute("DROP TABLE IF EXISTS fts_chunks")
+            try:
+                conn.execute("ALTER TABLE chunks ADD COLUMN doc_path TEXT DEFAULT ''")
+            except sqlite3.OperationalError:
+                pass
+            conn.execute(
+                "UPDATE chunks SET doc_path = "
+                "(SELECT path FROM documents WHERE id = chunks.doc_id)"
+            )
+            needs_fts_rebuild = True
         elif current == 3:
-            # Non-destructive migration: add tags column, rebuild FTS for triggers
+            # Non-destructive migration: add tags column + doc_path, rebuild FTS
             print(
                 f"Schema upgrade v{current} -> v{SCHEMA_VERSION}, adding tags column + FTS triggers..."
             )
+            for trigger in ("fts_ai", "fts_ad", "fts_au"):
+                conn.execute(f"DROP TRIGGER IF EXISTS {trigger}")
+            conn.execute("DROP TABLE IF EXISTS fts_chunks")
             try:
                 conn.execute("ALTER TABLE documents ADD COLUMN tags TEXT DEFAULT ''")
             except sqlite3.OperationalError:
-                pass  # column already exists
-            conn.execute("DROP TABLE IF EXISTS fts_chunks")
+                pass
+            try:
+                conn.execute("ALTER TABLE chunks ADD COLUMN doc_path TEXT DEFAULT ''")
+            except sqlite3.OperationalError:
+                pass
+            conn.execute(
+                "UPDATE chunks SET doc_path = "
+                "(SELECT path FROM documents WHERE id = chunks.doc_id)"
+            )
+            needs_fts_rebuild = True
         else:
             print(
                 f"Schema upgrade v{current} -> v{SCHEMA_VERSION}, rebuilding tables..."
@@ -123,7 +157,7 @@ def connect(cfg: Config) -> sqlite3.Connection:
     # Set weighted BM25: doc_path=10x, heading=2x, text=1x
     # This makes rank column use weighted bm25 automatically for all queries
     conn.execute("""
-        INSERT OR IGNORE INTO fts_chunks(fts_chunks, rank)
+        INSERT INTO fts_chunks(fts_chunks, rank)
         VALUES('rank', 'bm25(10.0, 2.0, 1.0)')
     """)
     conn.execute("""
@@ -146,6 +180,8 @@ def connect(cfg: Config) -> sqlite3.Connection:
             VALUES (new.id, new.doc_path, new.heading, new.text);
         END
     """)
+    if needs_fts_rebuild:
+        conn.execute("INSERT INTO fts_chunks(fts_chunks) VALUES('rebuild')")
     conn.commit()
     return conn
 

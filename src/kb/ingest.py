@@ -159,8 +159,8 @@ def _index_file(
         else:
             conn.execute(
                 "INSERT INTO chunks "
-                "(doc_id, chunk_index, text, heading, heading_ancestry, char_count, content_hash) "
-                "VALUES (?,?,?,?,?,?,?)",
+                "(doc_id, chunk_index, text, heading, heading_ancestry, char_count, content_hash, doc_path) "
+                "VALUES (?,?,?,?,?,?,?,?)",
                 (
                     doc_id,
                     i,
@@ -169,6 +169,7 @@ def _index_file(
                     ancestry,
                     len(chunk["text"]),
                     chunk_hash,
+                    rel_path,
                 ),
             )
             cid = conn.execute("SELECT last_insert_rowid()").fetchone()[0]

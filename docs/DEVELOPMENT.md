@@ -40,7 +40,8 @@ src/kb/
 ├── embed.py       — OpenAI embedding helpers, batching, serialize/deserialize for sqlite-vec
 ├── extract.py     — Text extraction registry for 30+ formats (PDF, DOCX, EPUB, HTML, ODT, etc.)
 ├── hyde.py        — HyDE: generates hypothetical answer passage via LLM for better vector retrieval
-├── search.py      — Hybrid search (vector + FTS5), RRF fusion
+├── expand.py      — Query expansion: local (FLAN-T5) or LLM, generates keyword + semantic variants
+├── search.py      — Hybrid search (vector + FTS5), RRF fusion, multi-list RRF for expansion
 ├── rerank.py      — Reranking: local cross-encoder (sentence-transformers) or LLM (RankGPT)
 ├── filters.py     — Pre-search filter parsing + application (file:, type:, tag:, dt>, dt<, +"kw", -"kw")
 └── ingest.py      — File indexing pipeline (unified loop over all supported formats, frontmatter tag parsing)
@@ -50,9 +51,9 @@ src/kb/
 
 **Indexing** (`kb index`): find files by extension → extract text (format-specific) → chunking → content-hash diff → embed new chunks → store in sqlite-vec (vec0) + FTS5
 
-**Search** (`kb search`): query → parse filters → [HyDE] → embed (passage or query) → vector search + FTS5 (original query) → RRF fusion → apply filters → results
+**Search** (`kb search`): query → parse filters → [HyDE] → [expand] → embed (passage or query + expansion vec texts) → vector search + FTS5 (original + expansion queries) → multi-list weighted RRF (primary 2x, expansions 1x) → apply filters → results
 
-**Ask** (`kb ask`): BM25 probe → if shortcut: FTS only; else: [HyDE] → embed → vec+fts → RRF → rerank (cross-encoder or LLM) → confidence threshold → LLM generates answer from context
+**Ask** (`kb ask`): BM25 probe → if shortcut: FTS only; else: [HyDE] → [expand] → embed + expansion batch → vec+fts (multi-query) → multi-list weighted RRF → rerank (cross-encoder or LLM) → confidence threshold → LLM generates answer from context
 
 **Similar** (`kb similar`): read chunk embeddings from vec0 → average into doc vector → KNN query → filter self → aggregate by doc → rank by similarity
 
@@ -62,6 +63,7 @@ src/kb/
 - **Reciprocal Rank Fusion** — combines vector and keyword rankings without needing score normalization
 - **FTS5 field weighting** — `doc_path` (10x), `heading` (2x), `text` (1x) via BM25 rank config; filepath matches strongly boost relevance
 - **HyDE (Hypothetical Document Embeddings)** — LLM generates a hypothetical answer passage before vector search, improving retrieval for question-style queries. FTS still uses original query. Graceful fallback on failure.
+- **Query expansion** — opt-in (`--expand`), generates keyword synonyms (`lex`) and semantic rephrasings (`vec`) via local FLAN-T5 or LLM, fused with primary results via multi-list weighted RRF
 - **Content-hash per chunk** — incremental indexing only re-embeds changed content
 - **Config walks up from cwd** — like `.gitignore`, so `kb` works from any subdirectory
 - **Tags** — comma-separated in `documents.tags` column; auto-parsed from markdown YAML frontmatter, manually managed via `kb tag`/`kb untag`

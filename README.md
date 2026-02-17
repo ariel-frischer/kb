@@ -12,6 +12,7 @@ CLI RAG tool for your docs. Index 30+ document formats (markdown, PDF, DOCX, EPU
 - **Keyword-only search** — `kb fts` for instant BM25 results with zero API cost (filepath matches weighted 10x, headings 2x)
 - **Heading-aware chunking** — markdown split by heading hierarchy, each chunk carries ancestry
 - **Incremental indexing** — content-hash per chunk, only re-embeds changes
+- **Query expansion** — generates keyword synonyms (for FTS) and semantic rephrasings (for vector search) via local FLAN-T5 or LLM, fuses all result lists with multi-list weighted RRF (`--expand`)
 - **Reranking** — `ask` over-fetches candidates, reranks by relevance (local cross-encoder or LLM), keeps the best
 - **Pre-search filters** — file globs, document type, tags, date ranges, keyword inclusion/exclusion
 - **Document tagging** — manual tags via `kb tag`, auto-parsed from markdown frontmatter
@@ -38,6 +39,7 @@ uv tool install --from "git+https://github.com/ariel-frischer/kb.git" "kb[pdf]" 
 uv tool install --from "git+https://github.com/ariel-frischer/kb.git" "kb[office]"    # + DOCX, PPTX, XLSX
 uv tool install --from "git+https://github.com/ariel-frischer/kb.git" "kb[rtf]"       # + RTF
 uv tool install --from "git+https://github.com/ariel-frischer/kb.git" "kb[rerank]"   # + local cross-encoder reranking
+uv tool install --from "git+https://github.com/ariel-frischer/kb.git" "kb[expand]"   # + local query expansion (FLAN-T5)
 ```
 
 Requires an OpenAI-compatible API. Set `OPENAI_API_KEY` in your environment (or in `~/.config/kb/secrets.toml`).
@@ -81,9 +83,9 @@ kb add <dir> [dir...]          Add source directories
 kb remove <dir> [dir...]       Remove source directories
 kb sources                     List configured sources
 kb index [DIR...]              Index sources from config (or explicit dirs)
-kb search "query" [k] [--threshold N] [--json|--csv|--md]  Hybrid search (default k=5)
+kb search "query" [k] [--threshold N] [--expand] [--json|--csv|--md]  Hybrid search (default k=5)
 kb fts "query" [k] [--json|--csv|--md]            Keyword-only search (instant, no API cost)
-kb ask "question" [k] [--threshold N] [--json|--csv|--md]  RAG answer (default k=8, BM25 shortcut when confident)
+kb ask "question" [k] [--threshold N] [--expand] [--json|--csv|--md]  RAG answer (default k=8, BM25 shortcut when confident)
 kb list                        Summary of indexed documents by type
 kb list --full                 List every indexed document with metadata
 kb similar <file> [k]          Find similar documents (no API call, default k=10)
@@ -142,6 +144,9 @@ sources = [
 # cross_encoder_model = "cross-encoder/ms-marco-MiniLM-L-6-v2"
 # hyde_enabled = true       # generate hypothetical passage before vector search
 # hyde_model = ""           # LLM for HyDE ("" = use chat_model)
+# query_expand = false     # generate keyword + semantic query expansions (also --expand flag)
+# expand_method = "local"  # "local" (FLAN-T5) or "llm" (OpenAI API)
+# expand_model = "google/flan-t5-small"  # model for local expand method
 # index_code = false       # set true to also index source code files
 ```
 
@@ -259,11 +264,12 @@ kb index
 kb search "query"
   1. Parse filters, strip from query
   2. HyDE: generate hypothetical answer passage via LLM (if enabled)
-  3. Embed passage (or raw query if HyDE disabled/failed)
-  4. Vector search (vec0 MATCH) + FTS5 keyword search (original query)
-  5. Fuse with RRF (rank bonuses for top positions)
-  6. Apply filters
-  7. Display results
+  3. [Expand]: generate keyword synonyms + semantic rephrasings (if --expand)
+  4. Embed passage (or raw query) + expansion vec texts (single batch)
+  5. Vector search (vec0 MATCH) + FTS5 keyword search (original + expansion queries)
+  6. Fuse with multi-list weighted RRF (primary 2x, expansions 1x)
+  7. Apply filters
+  8. Display results
 
 kb fts "query"
   1. Parse filters, strip from query
@@ -273,13 +279,14 @@ kb fts "query"
   5. Display results (instant, zero API cost)
 
 kb ask "question"
-  1. BM25 probe — if top FTS hit is high-confidence, skip to step 6
+  1. BM25 probe — if top FTS hit is high-confidence, skip to step 7
   2. HyDE: generate hypothetical answer passage via LLM (if enabled)
-  3. Same as search, but over-fetch 20
-  4. Apply filters
-  5. Rerank -> top 5 (cross-encoder or LLM)
-  6. Confidence threshold
-  7. LLM generates answer from context
+  3. [Expand]: generate keyword synonyms + semantic rephrasings (if --expand)
+  4. Same as search (with expansion), but over-fetch 20
+  5. Apply filters
+  6. Rerank -> top 5 (cross-encoder or LLM)
+  7. Confidence threshold
+  8. LLM generates answer from context
 ```
 
 ## MCP Server

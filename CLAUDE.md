@@ -50,6 +50,7 @@ Path resolution: `Config.doc_path_for_db()` computes stored paths — relative t
 - `search.py` — hybrid search: vector (vec0 MATCH) + FTS5 (AND + prefix matching), fused with score-weighted RRF (vec scaled by similarity, FTS by normalized BM25) with positional rank bonuses. `fill_fts_only_results()` backfills metadata for FTS-only hits.
 - `rerank.py` — Reranking dispatcher: `rerank()` routes to `cross_encoder_rerank()` (local, sentence-transformers) or `llm_rerank()` (RankGPT pattern) based on `cfg.rerank_method`. Cross-encoder uses GPU if available (CUDA > MPS > CPU), lazy-loads and caches model. Returns `(results, rerank_info)` tuple.
 - `hyde.py` — HyDE (Hypothetical Document Embeddings). `generate_hyde_passage()` asks LLM to write a hypothetical answer passage, which is then embedded instead of the raw query for vector search. Uses `cfg.hyde_model` or falls back to `cfg.chat_model`. Returns `(passage, elapsed_ms)`, `None` on failure (graceful fallback to raw query).
+- `expand.py` — Query expansion dispatcher: `expand_query()` routes to `local_expand()` (FLAN-T5-small via transformers, lazy-loaded and cached) or `llm_expand()` (OpenAI JSON mode). Returns typed expansions `[{"type": "lex"|"vec", "text": "..."}]`. Filters duplicates of original query. Graceful fallback to `[]` on error.
 - `filters.py` — inline filter syntax (`file:`, `type:`, `tag:`, `dt>`, `dt<`, `+"kw"`, `-"kw"`) parsed from query string, applied post-search
 - `embed.py` — thin OpenAI embedding wrapper, `serialize_f32()` / `deserialize_f32()` for sqlite-vec binary format
 
@@ -57,11 +58,11 @@ Path resolution: `Config.doc_path_for_db()` computes stored paths — relative t
 
 **Index**: files → extract_text → content-hash check (skip unchanged) → chunk → diff chunks by hash (reuse unchanged) → batch embed new → store in vec0 (FTS5 synced via triggers)
 
-**Search**: query → parse_filters → [HyDE] → embed (passage or query) → vec0 MATCH + FTS5 MATCH (original query) → RRF fusion (with rank bonuses) → apply_filters → display
+**Search**: query → parse_filters → [HyDE] → [expand] → embed (passage or query + expansion vec texts in one batch) → vec0 MATCH + FTS5 MATCH (original + expansion queries) → multi-list weighted RRF (primary 2.0, expansions 1.0) → apply_filters → display
 
 **FTS**: query → parse_filters → FTS5 MATCH → weighted BM25 scores (doc_path 10x, heading 2x, text 1x) → apply_filters → display (no embedding, instant)
 
-**Ask**: question → parse_filters → BM25 probe → if shortcut: FTS only; else: [HyDE] → embed (passage or query) → vec+fts → RRF → rerank (cross-encoder or LLM) → top rerank_top_k → confidence threshold → LLM generates answer. BM25 shortcut: if FTS top hit norm >= 0.85 with gap >= 0.15, skips HyDE/embedding/vector/rerank entirely.
+**Ask**: question → parse_filters → BM25 probe → if shortcut: FTS only; else: [HyDE] → [expand] → embed + expansion batch → vec+fts (multi-query) → multi-list weighted RRF → rerank (cross-encoder or LLM) → top rerank_top_k → confidence threshold → LLM generates answer. BM25 shortcut: if FTS top hit norm >= 0.85 with gap >= 0.15, skips HyDE/expansion/embedding/vector/rerank entirely.
 
 **Similar**: resolve file → read chunk embeddings from vec0 → average into doc vector → KNN query → filter out source doc → aggregate best distance per doc → display
 
@@ -72,7 +73,8 @@ Path resolution: `Config.doc_path_for_db()` computes stored paths — relative t
 - **FTS5 field-weighted trigger sync** — `fts_chunks` has 3 columns (`doc_path`, `heading`, `text`) with weighted BM25 (`bm25(10.0, 2.0, 1.0)`) set via rank config. Uses `content='chunks'` with INSERT/DELETE/UPDATE triggers (`fts_ai`, `fts_ad`, `fts_au`) for automatic sync. Porter stemming (`tokenize='porter unicode61'`) for word-form matching. Filepath matches get 10x weight, headings 2x
 - **Score-weighted RRF with rank bonuses** — fusion weights vec results by `similarity / (k + rank) + bonus` and FTS by `norm_bm25 / (k + rank) + bonus` where `norm_bm25 = |score| / (1 + |score|)` and bonus is +0.05 for rank 0, +0.02 for ranks 1-2
 - **HyDE (Hypothetical Document Embeddings)** — before vector search, LLM generates a hypothetical answer passage (~100-200 words) that gets embedded instead of the raw query. Improves retrieval for question-style queries because the passage occupies similar embedding space as actual document chunks. FTS still uses original query keywords. Enabled by default (`hyde_enabled = true`); uses `hyde_model` or falls back to `chat_model`. Gracefully falls back to raw query on failure.
-- **BM25 shortcut in ask** — probes top 2 FTS results before embedding; if top norm >= 0.85 with gap >= 0.15, skips HyDE/embedding/vector/rerank and uses FTS results directly
+- **Query expansion** — opt-in (`query_expand = false` by default, `--expand` CLI flag). Generates typed expansions: `lex` (keyword synonyms for FTS) and `vec` (semantic rephrasings for vector search). Two methods: `local` (FLAN-T5-small via transformers, lazy-loaded/cached, ~1s CPU) or `llm` (OpenAI JSON mode via `cfg.chat_model`). Expansion results fused with primary results via `multi_rrf_fuse()` — primary lists weighted 2.0, expansion lists 1.0. BM25 shortcut skips expansion entirely.
+- **BM25 shortcut in ask** — probes top 2 FTS results before embedding; if top norm >= 0.85 with gap >= 0.15, skips HyDE/expansion/embedding/vector/rerank and uses FTS results directly
 - **Schema versioning** — `SCHEMA_VERSION` in `meta` table; v6→v7 adds `doc_path` to chunks + rebuilds FTS with 3 columns and field weights; v5→v6 rebuilds FTS with porter tokenizer; v4→v5 rebuilds FTS with triggers; v3→v4 uses non-destructive ALTER TABLE; older upgrades drop and recreate all tables
 - **Structured output** — `search`, `fts`, and `ask` support `--json`, `--csv`, and `--md` flags for structured output (JSON for scripting/agents, CSV for spreadsheets, markdown tables for docs/LLMs)
 - **Tags** — stored comma-separated in `documents.tags` column; auto-parsed from markdown YAML frontmatter during indexing; manually managed via `kb tag`/`kb untag`

@@ -2,6 +2,8 @@ releases:
   - version: "unreleased"
     date: null
     added:
+      - description: "Query expansion — generates keyword synonyms (FTS) and semantic rephrasings (vector) via local FLAN-T5 or LLM, fuses with multi-list weighted RRF (`--expand` / `--no-expand`)"
+        commits: ["e04c35f", "a00068b"]
       - description: "HyDE (Hypothetical Document Embeddings) — generates a hypothetical answer passage via LLM before vector search for improved retrieval on question-style queries"
         commits: ["59fadc9", "a00068b"]
       - description: "FTS-only keyword search command (`kb fts`) for fast, no-API searches"

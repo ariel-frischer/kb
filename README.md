@@ -8,7 +8,7 @@ CLI RAG tool for your docs. Index 30+ document formats (markdown, PDF, DOCX, EPU
 ## Features
 
 - **Hybrid search** — vector similarity + FTS5 keyword search, fused with Reciprocal Rank Fusion (with rank bonuses)
-- **Keyword-only search** — `kb fts` for instant BM25 results with zero API cost
+- **Keyword-only search** — `kb fts` for instant BM25 results with zero API cost (filepath matches weighted 10x, headings 2x)
 - **Heading-aware chunking** — markdown split by heading hierarchy, each chunk carries ancestry
 - **Incremental indexing** — content-hash per chunk, only re-embeds changes
 - **Reranking** — `ask` over-fetches candidates, reranks by relevance (local cross-encoder or LLM), keeps the best
@@ -263,7 +263,7 @@ kb search "query"
 
 kb fts "query"
   1. Parse filters, strip from query
-  2. FTS5 keyword search (no embedding)
+  2. FTS5 keyword search (no embedding, weighted BM25: filepath 10x, heading 2x)
   3. Normalize BM25 scores
   4. Apply filters
   5. Display results (instant, zero API cost)

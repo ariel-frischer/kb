@@ -45,7 +45,7 @@ Path resolution: `Config.doc_path_for_db()` computes stored paths — relative t
 - `config.py` — `Config` dataclass with all tunables, `find_config()` walk-up loader, `save_config()` minimal TOML serializer (only writes non-default values)
 - `extract.py` — text extraction registry. `_register()` maps extensions to `(extractor_fn, doc_type, available, install_hint, is_code)`. Stdlib formats always available; optional deps (pymupdf, python-docx, etc.) probed at import time.
 - `ingest.py` — indexing pipeline: discover files → `.kbignore` filtering → size guard → `extract_text()` → frontmatter tag parsing (markdown) → content-hash diff → chunk → diff chunks by hash → batch embed new → store
-- `db.py` — schema creation + `SCHEMA_VERSION` migration. Tables: `documents` (with `tags` column), `chunks`, `vec_chunks` (vec0 virtual table), `fts_chunks` (FTS5 with porter stemming + trigger-based sync from chunks). WAL mode + foreign keys enabled. v5→v6 rebuilds FTS with porter tokenizer; v4→v5 rebuilds FTS with triggers; v3→v4 uses ALTER TABLE; older versions drop-and-recreate.
+- `db.py` — schema creation + `SCHEMA_VERSION` migration. Tables: `documents` (with `tags` column), `chunks` (with `doc_path` column), `vec_chunks` (vec0 virtual table), `fts_chunks` (FTS5 with 3 columns: doc_path/heading/text, weighted BM25, porter stemming, trigger-based sync from chunks). WAL mode + foreign keys enabled. v6→v7 adds `doc_path` to chunks + FTS with field weights; v5→v6 rebuilds FTS with porter tokenizer; v4→v5 rebuilds FTS with triggers; v3→v4 uses ALTER TABLE; older versions drop-and-recreate.
 - `chunk.py` — markdown (heading-aware with ancestry tracking) + plain text chunking. Uses chonkie with overlap refinery when available, regex fallback otherwise. `embedding_text()` enriches chunks with file path + heading ancestry before embedding.
 - `search.py` — hybrid search: vector (vec0 MATCH) + FTS5 (AND + prefix matching), fused with score-weighted RRF (vec scaled by similarity, FTS by normalized BM25) with positional rank bonuses. `fill_fts_only_results()` backfills metadata for FTS-only hits.
 - `rerank.py` — Reranking dispatcher: `rerank()` routes to `cross_encoder_rerank()` (local, sentence-transformers) or `llm_rerank()` (RankGPT pattern) based on `cfg.rerank_method`. Cross-encoder uses GPU if available (CUDA > MPS > CPU), lazy-loads and caches model. Returns `(results, rerank_info)` tuple.
@@ -58,7 +58,7 @@ Path resolution: `Config.doc_path_for_db()` computes stored paths — relative t
 
 **Search**: query → parse_filters → embed → vec0 MATCH + FTS5 MATCH → RRF fusion (with rank bonuses) → apply_filters → display
 
-**FTS**: query → parse_filters → FTS5 MATCH → normalized BM25 scores → apply_filters → display (no embedding, instant)
+**FTS**: query → parse_filters → FTS5 MATCH → weighted BM25 scores (doc_path 10x, heading 2x, text 1x) → apply_filters → display (no embedding, instant)
 
 **Ask**: same as search but over-fetches (rerank_fetch_k=20) → rerank (cross-encoder or LLM) → top rerank_top_k → confidence threshold → LLM generates answer. BM25 shortcut: if FTS top hit norm >= 0.85 with gap >= 0.15, skips embedding/vector/rerank entirely.
 
@@ -68,10 +68,10 @@ Path resolution: `Config.doc_path_for_db()` computes stored paths — relative t
 
 - **vec0 auxiliary columns** — `vec_chunks` stores chunk_text, doc_path, heading alongside embeddings, avoiding JOINs at search time
 - **Content-hash at two levels** — file-level hash skips unchanged files entirely; chunk-level hash avoids re-embedding unchanged chunks within modified files
-- **FTS5 trigger sync** — `fts_chunks` uses `content='chunks'` with INSERT/DELETE/UPDATE triggers (`fts_ai`, `fts_ad`, `fts_au`) for automatic sync. Uses porter stemming (`tokenize='porter unicode61'`) for word-form matching
+- **FTS5 field-weighted trigger sync** — `fts_chunks` has 3 columns (`doc_path`, `heading`, `text`) with weighted BM25 (`bm25(10.0, 2.0, 1.0)`) set via rank config. Uses `content='chunks'` with INSERT/DELETE/UPDATE triggers (`fts_ai`, `fts_ad`, `fts_au`) for automatic sync. Porter stemming (`tokenize='porter unicode61'`) for word-form matching. Filepath matches get 10x weight, headings 2x
 - **Score-weighted RRF with rank bonuses** — fusion weights vec results by `similarity / (k + rank) + bonus` and FTS by `norm_bm25 / (k + rank) + bonus` where `norm_bm25 = |score| / (1 + |score|)` and bonus is +0.05 for rank 0, +0.02 for ranks 1-2
 - **BM25 shortcut in ask** — probes top 2 FTS results before embedding; if top norm >= 0.85 with gap >= 0.15, skips embedding/vector/rerank and uses FTS results directly
-- **Schema versioning** — `SCHEMA_VERSION` in `meta` table; v5→v6 rebuilds FTS with porter tokenizer; v4→v5 rebuilds FTS with triggers; v3→v4 uses non-destructive ALTER TABLE; older upgrades drop and recreate all tables
+- **Schema versioning** — `SCHEMA_VERSION` in `meta` table; v6→v7 adds `doc_path` to chunks + rebuilds FTS with 3 columns and field weights; v5→v6 rebuilds FTS with porter tokenizer; v4→v5 rebuilds FTS with triggers; v3→v4 uses non-destructive ALTER TABLE; older upgrades drop and recreate all tables
 - **Structured output** — `search`, `fts`, and `ask` support `--json`, `--csv`, and `--md` flags for structured output (JSON for scripting/agents, CSV for spreadsheets, markdown tables for docs/LLMs)
 - **Tags** — stored comma-separated in `documents.tags` column; auto-parsed from markdown YAML frontmatter during indexing; manually managed via `kb tag`/`kb untag`
 - **MCP server** — `kb mcp` / `kb-mcp` starts a Model Context Protocol server (stdio transport) exposing search/ask/fts/similar/status/list as tools for Claude Desktop, Claude Code, and other MCP clients. Optional dep: `mcp[cli]` (included in `kb[all]`)

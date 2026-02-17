@@ -10,6 +10,8 @@ releases:
         commits: ["cce0a74"]
       - description: "FTS5 trigger-based sync with porter stemming tokenizer"
         commits: ["cce0a74", "5b145f1"]
+      - description: "FTS5 field weighting — doc_path (10x), heading (2x), text (1x) via weighted BM25 rank config"
+        commits: []
       - description: "MCP server exposing search/ask/fts/similar/status/list tools for AI agents"
         commits: ["5b145f1", "5d35d92"]
       - description: "Core API module (`api.py`) separating logic from CLI presentation"
@@ -22,7 +24,7 @@ releases:
       - description: "Enable WAL mode and foreign keys for better DB performance"
         commits: ["5b145f1"]
     changed:
-      - description: "Schema version upgraded from 4 to 6 (FTS triggers + porter tokenizer)"
+      - description: "Schema version upgraded from 4 to 7 (FTS triggers + porter tokenizer + field weighting)"
         commits: ["cce0a74", "5b145f1"]
       - description: "CLI refactored to thin wrappers over `api.py` core functions"
         commits: ["5b145f1"]
@@ -31,7 +33,7 @@ releases:
     removed: []
     deprecated: []
     breaking: []
-    migration: "Schema auto-migrates from v4→v5→v6. FTS index is rebuilt automatically."
+    migration: "Schema auto-migrates from v4→v5→v6→v7. v6→v7 adds doc_path column to chunks and rebuilds FTS with 3-column weighted BM25. FTS index is rebuilt automatically."
     contributors: ["ariel-frischer"]
 
   - version: "1.0.8"

@@ -59,6 +59,7 @@ src/kb/
 
 - **sqlite-vec `vec0` virtual table** — stores embeddings + text in auxiliary columns, avoiding JOINs at search time
 - **Reciprocal Rank Fusion** — combines vector and keyword rankings without needing score normalization
+- **FTS5 field weighting** — `doc_path` (10x), `heading` (2x), `text` (1x) via BM25 rank config; filepath matches strongly boost relevance
 - **Content-hash per chunk** — incremental indexing only re-embeds changed content
 - **Config walks up from cwd** — like `.gitignore`, so `kb` works from any subdirectory
 - **Tags** — comma-separated in `documents.tags` column; auto-parsed from markdown YAML frontmatter, manually managed via `kb tag`/`kb untag`

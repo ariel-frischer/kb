@@ -23,7 +23,25 @@ def connect(cfg: Config) -> sqlite3.Connection:
     current = int(row[0]) if row else 0
 
     if current < SCHEMA_VERSION:
-        if current == 5:
+        if current == 6:
+            # Non-destructive: add doc_path to chunks, rebuild FTS with 3 columns + weights
+            print(
+                f"Schema upgrade v{current} -> v{SCHEMA_VERSION}, adding doc_path to FTS..."
+            )
+            try:
+                conn.execute(
+                    "ALTER TABLE chunks ADD COLUMN doc_path TEXT DEFAULT ''"
+                )
+            except sqlite3.OperationalError:
+                pass  # column already exists
+            conn.execute(
+                "UPDATE chunks SET doc_path = "
+                "(SELECT path FROM documents WHERE id = chunks.doc_id)"
+            )
+            for trigger in ("fts_ai", "fts_ad", "fts_au"):
+                conn.execute(f"DROP TRIGGER IF EXISTS {trigger}")
+            conn.execute("DROP TABLE IF EXISTS fts_chunks")
+        elif current == 5:
             # Non-destructive: rebuild FTS with porter tokenizer
             print(
                 f"Schema upgrade v{current} -> v{SCHEMA_VERSION}, rebuilding FTS with porter tokenizer..."
@@ -79,7 +97,8 @@ def connect(cfg: Config) -> sqlite3.Connection:
             heading TEXT,
             heading_ancestry TEXT,
             char_count INTEGER,
-            content_hash TEXT
+            content_hash TEXT,
+            doc_path TEXT DEFAULT ''
         )
     """)
     conn.execute(f"""
@@ -93,31 +112,38 @@ def connect(cfg: Config) -> sqlite3.Connection:
     """)
     conn.execute("""
         CREATE VIRTUAL TABLE IF NOT EXISTS fts_chunks USING fts5(
-            text,
+            doc_path,
             heading,
+            text,
             content='chunks',
             content_rowid='id',
             tokenize='porter unicode61'
         )
     """)
+    # Set weighted BM25: doc_path=10x, heading=2x, text=1x
+    # This makes rank column use weighted bm25 automatically for all queries
+    conn.execute("""
+        INSERT OR IGNORE INTO fts_chunks(fts_chunks, rank)
+        VALUES('rank', 'bm25(10.0, 2.0, 1.0)')
+    """)
     conn.execute("""
         CREATE TRIGGER IF NOT EXISTS fts_ai AFTER INSERT ON chunks BEGIN
-            INSERT INTO fts_chunks(rowid, text, heading)
-            VALUES (new.id, new.text, new.heading);
+            INSERT INTO fts_chunks(rowid, doc_path, heading, text)
+            VALUES (new.id, new.doc_path, new.heading, new.text);
         END
     """)
     conn.execute("""
         CREATE TRIGGER IF NOT EXISTS fts_ad AFTER DELETE ON chunks BEGIN
-            INSERT INTO fts_chunks(fts_chunks, rowid, text, heading)
-            VALUES ('delete', old.id, old.text, old.heading);
+            INSERT INTO fts_chunks(fts_chunks, rowid, doc_path, heading, text)
+            VALUES ('delete', old.id, old.doc_path, old.heading, old.text);
         END
     """)
     conn.execute("""
         CREATE TRIGGER IF NOT EXISTS fts_au AFTER UPDATE ON chunks BEGIN
-            INSERT INTO fts_chunks(fts_chunks, rowid, text, heading)
-            VALUES ('delete', old.id, old.text, old.heading);
-            INSERT INTO fts_chunks(rowid, text, heading)
-            VALUES (new.id, new.text, new.heading);
+            INSERT INTO fts_chunks(fts_chunks, rowid, doc_path, heading, text)
+            VALUES ('delete', old.id, old.doc_path, old.heading, old.text);
+            INSERT INTO fts_chunks(rowid, doc_path, heading, text)
+            VALUES (new.id, new.doc_path, new.heading, new.text);
         END
     """)
     conn.commit()

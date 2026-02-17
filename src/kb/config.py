@@ -7,7 +7,7 @@ from pathlib import Path
 
 PROJECT_CONFIG_FILE = ".kb.toml"
 SECRETS_PATH = Path.home() / ".config" / "kb" / "secrets.toml"
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 GLOBAL_CONFIG_DIR = Path.home() / ".config" / "kb"
 GLOBAL_CONFIG_FILE = GLOBAL_CONFIG_DIR / "config.toml"

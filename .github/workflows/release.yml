@@ -19,7 +19,21 @@ jobs:
       - run: uv run ruff format --check .
       - run: uv run pytest
       - run: uv build
+      - name: Extract changelog notes
+        id: changelog
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          NOTES=$(uv run python scripts/changelog_to_md.py "$VERSION")
+          {
+            echo "body<<CHANGELOG_EOF"
+            if [ -n "$NOTES" ]; then
+              echo "$NOTES"
+            else
+              echo "Release ${GITHUB_REF_NAME}"
+            fi
+            echo "CHANGELOG_EOF"
+          } >> "$GITHUB_OUTPUT"
       - uses: softprops/action-gh-release@v2
         with:
-          generate_release_notes: true
+          body: ${{ steps.changelog.outputs.body }}
           files: dist/*

@@ -5,18 +5,17 @@ Usage: changelog_to_md.py <version>
        changelog_to_md.py 1.0.8
 
 Prints markdown to stdout. If the entry has a `summary` field, it's printed
-first as a paragraph, followed by a detailed breakdown. If no summary exists,
-just the detailed breakdown is printed.
+first as a paragraph, followed by a detailed breakdown.
 
 Exits 0 even if version not found (empty output).
+No external dependencies — parses the YAML subset used by CHANGELOG.yaml directly.
 """
 
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
-
-import yaml
 
 CHANGELOG_PATH = Path(__file__).resolve().parent.parent / "CHANGELOG.yaml"
 
@@ -30,35 +29,93 @@ CATEGORY_TITLES = {
 }
 
 
+def extract_version_block(text: str, version: str) -> str | None:
+    """Extract the raw YAML block for a specific version."""
+    # Match the version entry start: `  - version: "X.Y.Z"`
+    pattern = rf'^  - version: "{re.escape(version)}"$'
+    match = re.search(pattern, text, re.MULTILINE)
+    if not match:
+        return None
+
+    start = match.start()
+    # Find the next version entry or end of file
+    next_entry = re.search(r"^  - version:", text[match.end() :], re.MULTILINE)
+    if next_entry:
+        end = match.end() + next_entry.start()
+    else:
+        end = len(text)
+
+    return text[start:end].rstrip()
+
+
+def parse_entry(block: str) -> dict:
+    """Parse a version block into a dict with summary, categories, migration."""
+    entry: dict = {"summary": None, "migration": None}
+
+    # Extract summary (single-line string value)
+    m = re.search(r'^\s+summary:\s*"(.+?)"$', block, re.MULTILINE)
+    if m:
+        entry["summary"] = m.group(1)
+
+    # Extract migration
+    m = re.search(r'^\s+migration:\s*"(.+?)"$', block, re.MULTILINE)
+    if m:
+        entry["migration"] = m.group(1)
+
+    # Extract category items
+    for cat in CATEGORY_TITLES:
+        items = []
+        # Find category section
+        cat_match = re.search(rf"^\s+{cat}:\s*$", block, re.MULTILINE)
+        if cat_match:
+            # Collect description lines until next category or end
+            rest = block[cat_match.end() :]
+            for desc_match in re.finditer(r'^\s+- description:\s*"(.+?)"$', rest, re.MULTILINE):
+                # Stop if we've hit the next top-level key
+                preceding = rest[: desc_match.start()]
+                if re.search(r"^\s+\w+:", preceding.split("\n")[-1] if preceding else "", re.MULTILINE):
+                    # Check if it's a sub-key (commits:) or a new category
+                    pass
+                items.append(desc_match.group(1))
+            # Stop collecting at next category
+            filtered = []
+            for line in rest.splitlines():
+                # If line is a new top-level category, stop
+                stripped = line.strip()
+                if stripped and not stripped.startswith("-") and not stripped.startswith("commits:") and ":" in stripped:
+                    key = stripped.split(":")[0]
+                    if key in CATEGORY_TITLES or key in ("migration", "contributors"):
+                        break
+                m2 = re.match(r'\s+- description:\s*"(.+?)"', line)
+                if m2:
+                    filtered.append(m2.group(1))
+            items = filtered
+        entry[cat] = items
+
+    return entry
+
+
 def render_entry(entry: dict) -> str:
-    """Render a single release entry as markdown."""
+    """Render a parsed entry as markdown."""
     lines: list[str] = []
 
-    summary = entry.get("summary")
-    if summary:
-        lines.append(summary)
+    if entry.get("summary"):
+        lines.append(entry["summary"])
         lines.append("")
 
-    has_details = False
-    for key, title in CATEGORY_TITLES.items():
-        items = entry.get(key, [])
+    for cat, title in CATEGORY_TITLES.items():
+        items = entry.get(cat, [])
         if not items:
             continue
-        has_details = True
         lines.append(f"### {title}")
-        for item in items:
-            desc = item.get("description", "") if isinstance(item, dict) else str(item)
+        for desc in items:
             lines.append(f"- {desc}")
         lines.append("")
 
-    migration = entry.get("migration")
-    if migration:
+    if entry.get("migration"):
         lines.append("### Migration")
-        lines.append(migration)
+        lines.append(entry["migration"])
         lines.append("")
-
-    if summary and not has_details:
-        return summary.rstrip()
 
     return "\n".join(lines).rstrip()
 
@@ -73,15 +130,15 @@ def main() -> None:
     if not CHANGELOG_PATH.exists():
         return
 
-    data = yaml.safe_load(CHANGELOG_PATH.read_text())
-    releases = data.get("releases", [])
+    text = CHANGELOG_PATH.read_text()
+    block = extract_version_block(text, version)
+    if not block:
+        return
 
-    for entry in releases:
-        if entry.get("version") == version:
-            md = render_entry(entry)
-            if md:
-                print(md)
-            return
+    entry = parse_entry(block)
+    md = render_entry(entry)
+    if md:
+        print(md)
 
 
 if __name__ == "__main__":

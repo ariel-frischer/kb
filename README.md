@@ -7,7 +7,8 @@ CLI RAG tool for your docs. Index 30+ document formats (markdown, PDF, DOCX, EPU
 
 ## Features
 
-- **Hybrid search** — vector similarity + FTS5 keyword search, fused with Reciprocal Rank Fusion
+- **Hybrid search** — vector similarity + FTS5 keyword search, fused with Reciprocal Rank Fusion (with rank bonuses)
+- **Keyword-only search** — `kb fts` for instant BM25 results with zero API cost
 - **Heading-aware chunking** — markdown split by heading hierarchy, each chunk carries ancestry
 - **Incremental indexing** — content-hash per chunk, only re-embeds changes
 - **LLM rerank** — `ask` over-fetches candidates, LLM ranks by relevance, keeps the best
@@ -52,16 +53,19 @@ kb add ~/notes ~/docs ~/repos/my-project/docs
 # 3. Index
 kb index
 
-# 4. Search
+# 4. Search (hybrid: semantic + keyword)
 kb search "deployment patterns"
 
-# 5. Ask (RAG: search → rerank → answer)
+# 5. Quick keyword search (instant, no API cost)
+kb fts "deployment patterns"
+
+# 6. Ask (RAG: search → rerank → answer)
 kb ask "what are the recommended deployment patterns?"
 
-# 6. List indexed documents
+# 7. List indexed documents
 kb list
 
-# 7. Check what's indexed
+# 8. Check what's indexed
 kb stats
 ```
 
@@ -74,8 +78,9 @@ kb add <dir> [dir...]          Add source directories
 kb remove <dir> [dir...]       Remove source directories
 kb sources                     List configured sources
 kb index [DIR...]              Index sources from config (or explicit dirs)
-kb search "query" [k] [--threshold N]  Hybrid search (default k=5)
-kb ask "question" [k] [--threshold N]  RAG answer (search + rerank + generate, default k=8)
+kb search "query" [k] [--threshold N] [--json]  Hybrid search (default k=5)
+kb fts "query" [k] [--json]            Keyword-only search (instant, no API cost)
+kb ask "question" [k] [--threshold N] [--json]  RAG answer (default k=8, BM25 shortcut when confident)
 kb list                        Summary of indexed documents by type
 kb list --full                 List every indexed document with metadata
 kb similar <file> [k]          Find similar documents (no API call, default k=10)
@@ -247,16 +252,24 @@ kb search "query"
   1. Parse filters, strip from query
   2. Embed clean query
   3. Vector search (vec0 MATCH) + FTS5 keyword search
-  4. Fuse with RRF
+  4. Fuse with RRF (rank bonuses for top positions)
   5. Apply filters
   6. Display results
 
+kb fts "query"
+  1. Parse filters, strip from query
+  2. FTS5 keyword search (no embedding)
+  3. Normalize BM25 scores
+  4. Apply filters
+  5. Display results (instant, zero API cost)
+
 kb ask "question"
-  1. Same as search, but over-fetch 20
-  2. Apply filters
-  3. LLM rerank -> top 5
-  4. Confidence threshold
-  5. LLM generates answer from context
+  1. BM25 probe — if top FTS hit is high-confidence, skip to step 5
+  2. Same as search, but over-fetch 20
+  3. Apply filters
+  4. LLM rerank -> top 5
+  5. Confidence threshold
+  6. LLM generates answer from context
 ```
 
 ## Alternatives

@@ -67,7 +67,8 @@ Path resolution: `Config.doc_path_for_db()` computes stored paths — relative t
 - **vec0 auxiliary columns** — `vec_chunks` stores chunk_text, doc_path, heading alongside embeddings, avoiding JOINs at search time
 - **Content-hash at two levels** — file-level hash skips unchanged files entirely; chunk-level hash avoids re-embedding unchanged chunks within modified files
 - **FTS5 trigger sync** — `fts_chunks` uses `content='chunks'` with INSERT/DELETE/UPDATE triggers (`fts_ai`, `fts_ad`, `fts_au`) for automatic sync
-- **Score-weighted RRF** — fusion weights vec results by `similarity / (k + rank)` and FTS by `norm_bm25 / (k + rank)` where `norm_bm25 = |score| / (1 + |score|)`
+- **Score-weighted RRF with rank bonuses** — fusion weights vec results by `similarity / (k + rank) + bonus` and FTS by `norm_bm25 / (k + rank) + bonus` where `norm_bm25 = |score| / (1 + |score|)` and bonus is +0.05 for rank 0, +0.02 for ranks 1-2
+- **BM25 shortcut in ask** — probes top 2 FTS results before embedding; if top norm >= 0.85 with gap >= 0.15, skips embedding/vector/rerank and uses FTS results directly
 - **Schema versioning** — `SCHEMA_VERSION` in `meta` table; v4→v5 rebuilds FTS with triggers; v3→v4 uses non-destructive ALTER TABLE; older upgrades drop and recreate all tables
-- **JSON output** — `search` and `ask` support `--json` flag for structured output (scripting/agent integration)
+- **JSON output** — `search`, `fts`, and `ask` support `--json` flag for structured output (scripting/agent integration)
 - **Tags** — stored comma-separated in `documents.tags` column; auto-parsed from markdown YAML frontmatter during indexing; manually managed via `kb tag`/`kb untag`

@@ -35,16 +35,14 @@ def rrf_fuse(
     FTS: norm_bm25 / (k + rank), where norm_bm25 = |score| / (1 + |score|)
     """
     scores: dict[int, float] = {}
+    top_rank: dict[int, int] = {}  # chunk_id -> best rank across all lists
     vec_data: dict[int, dict] = {}
     fts_data: dict[int, float] = {}  # chunk_id -> fts_rank
 
     for rank, (chunk_id, distance, text, doc_path, heading) in enumerate(vec_results):
         similarity = 1.0 - distance
-        scores[chunk_id] = (
-            scores.get(chunk_id, 0)
-            + similarity / (cfg.rrf_k + rank)
-            + _rank_bonus(rank)
-        )
+        scores[chunk_id] = scores.get(chunk_id, 0) + similarity / (cfg.rrf_k + rank)
+        top_rank[chunk_id] = min(top_rank.get(chunk_id, rank), rank)
         vec_data[chunk_id] = {
             "distance": distance,
             "text": text,
@@ -55,10 +53,13 @@ def rrf_fuse(
     for rank, (chunk_id, fts_rank) in enumerate(fts_results):
         abs_rank = abs(fts_rank)
         norm_bm25 = abs_rank / (1.0 + abs_rank)
-        scores[chunk_id] = (
-            scores.get(chunk_id, 0) + norm_bm25 / (cfg.rrf_k + rank) + _rank_bonus(rank)
-        )
+        scores[chunk_id] = scores.get(chunk_id, 0) + norm_bm25 / (cfg.rrf_k + rank)
+        top_rank[chunk_id] = min(top_rank.get(chunk_id, rank), rank)
         fts_data[chunk_id] = fts_rank
+
+    # Apply rank bonus once per chunk based on best rank across all lists
+    for chunk_id in scores:
+        scores[chunk_id] += _rank_bonus(top_rank[chunk_id])
 
     ranked = sorted(scores.items(), key=lambda x: -x[1])[:top_k]
 

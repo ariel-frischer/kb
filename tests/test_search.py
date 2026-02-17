@@ -59,10 +59,12 @@ class TestRrfFuse:
         fts = [(1, -2.0)]
         results = rrf_fuse(vec, fts, top_k=5, cfg=cfg)
         assert len(results) == 1
-        # Vec: similarity(0.7) / 60 + 0.05, FTS: norm_bm25(2/3) / 60 + 0.05
-        vec_contrib = 0.7 / 60.0 + 0.05
-        fts_contrib = (2.0 / 3.0) / 60.0 + 0.05
-        assert results[0]["rrf_score"] == pytest.approx(vec_contrib + fts_contrib)
+        # Vec: similarity(0.7) / 60, FTS: norm_bm25(2/3) / 60, + single rank bonus(0)
+        vec_contrib = 0.7 / 60.0
+        fts_contrib = (2.0 / 3.0) / 60.0
+        assert results[0]["rrf_score"] == pytest.approx(
+            vec_contrib + fts_contrib + 0.05
+        )
         assert results[0]["in_vec"] is True
         assert results[0]["in_fts"] is True
 

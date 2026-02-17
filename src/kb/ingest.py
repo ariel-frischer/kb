@@ -318,7 +318,6 @@ def index_directory(dir_path: Path, cfg: Config, *, no_size_limit: bool = False)
 
         print(f"  Embedding time: {time.time() - t0:.2f}s")
 
-    conn.execute("INSERT INTO fts_chunks(fts_chunks) VALUES('rebuild')")
     conn.commit()
 
     total = conn.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]

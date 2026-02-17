@@ -36,6 +36,8 @@ class TestRrfFuse:
         assert results[0]["in_vec"] is True
         assert results[0]["in_fts"] is False
         assert results[0]["similarity"] == pytest.approx(0.8)
+        # Score-weighted: similarity / (k + rank) = 0.8 / 60
+        assert results[0]["rrf_score"] == pytest.approx(0.8 / 60.0)
 
     def test_fts_only(self):
         cfg = Config(rrf_k=60.0)
@@ -47,6 +49,9 @@ class TestRrfFuse:
         assert results[0]["in_fts"] is True
         assert results[0]["in_vec"] is False
         assert results[0]["text"] is None  # no vec data
+        assert results[0]["fts_rank"] == -1.5
+        # norm_bm25 = 1.5 / (1 + 1.5) = 0.6
+        assert results[0]["rrf_score"] == pytest.approx(0.6 / 60.0)
 
     def test_overlap_boosts_score(self):
         cfg = Config(rrf_k=60.0)
@@ -54,9 +59,10 @@ class TestRrfFuse:
         fts = [(1, -2.0)]
         results = rrf_fuse(vec, fts, top_k=5, cfg=cfg)
         assert len(results) == 1
-        # Score should be sum of both contributions
-        expected = 1.0 / 60.0 + 1.0 / 60.0  # rank 0 in both
-        assert results[0]["rrf_score"] == pytest.approx(expected)
+        # Vec: similarity(0.7) / 60, FTS: norm_bm25(2/3) / 60
+        vec_contrib = 0.7 / 60.0
+        fts_contrib = (2.0 / 3.0) / 60.0
+        assert results[0]["rrf_score"] == pytest.approx(vec_contrib + fts_contrib)
         assert results[0]["in_vec"] is True
         assert results[0]["in_fts"] is True
 
@@ -86,6 +92,23 @@ class TestRrfFuse:
         results = rrf_fuse(vec, [], top_k=5, cfg=cfg)
         assert results[0]["distance"] == 0.25
         assert results[0]["similarity"] == pytest.approx(0.75)
+
+    def test_bm25_normalization(self):
+        """High BM25 scores produce higher fusion contributions than low ones."""
+        cfg = Config(rrf_k=60.0)
+        # Two FTS-only results at same rank position but different BM25 scores
+        # Test separately to isolate normalization effect
+        fts_high = [(1, -10.0)]  # high BM25
+        fts_low = [(2, -0.1)]  # low BM25
+        results_high = rrf_fuse([], fts_high, top_k=5, cfg=cfg)
+        results_low = rrf_fuse([], fts_low, top_k=5, cfg=cfg)
+        assert results_high[0]["rrf_score"] > results_low[0]["rrf_score"]
+        # Verify normalization bounds: norm_bm25 is always in (0, 1)
+        # High: 10/(1+10) = 0.909..., Low: 0.1/(1+0.1) = 0.0909...
+        expected_high = (10.0 / 11.0) / 60.0
+        expected_low = (0.1 / 1.1) / 60.0
+        assert results_high[0]["rrf_score"] == pytest.approx(expected_high)
+        assert results_low[0]["rrf_score"] == pytest.approx(expected_low)
 
 
 class TestFillFtsOnlyResults:

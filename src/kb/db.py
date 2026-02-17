@@ -21,15 +21,22 @@ def connect(cfg: Config) -> sqlite3.Connection:
     current = int(row[0]) if row else 0
 
     if current < SCHEMA_VERSION:
-        if current == 3:
-            # Non-destructive migration: add tags column
+        if current == 4:
+            # Non-destructive: rebuild FTS with triggers, data preserved
             print(
-                f"Schema upgrade v{current} -> v{SCHEMA_VERSION}, adding tags column..."
+                f"Schema upgrade v{current} -> v{SCHEMA_VERSION}, rebuilding FTS with triggers..."
+            )
+            conn.execute("DROP TABLE IF EXISTS fts_chunks")
+        elif current == 3:
+            # Non-destructive migration: add tags column, rebuild FTS for triggers
+            print(
+                f"Schema upgrade v{current} -> v{SCHEMA_VERSION}, adding tags column + FTS triggers..."
             )
             try:
                 conn.execute("ALTER TABLE documents ADD COLUMN tags TEXT DEFAULT ''")
             except sqlite3.OperationalError:
                 pass  # column already exists
+            conn.execute("DROP TABLE IF EXISTS fts_chunks")
         else:
             print(
                 f"Schema upgrade v{current} -> v{SCHEMA_VERSION}, rebuilding tables..."
@@ -83,6 +90,26 @@ def connect(cfg: Config) -> sqlite3.Connection:
             content='chunks',
             content_rowid='id'
         )
+    """)
+    conn.execute("""
+        CREATE TRIGGER IF NOT EXISTS fts_ai AFTER INSERT ON chunks BEGIN
+            INSERT INTO fts_chunks(rowid, text, heading)
+            VALUES (new.id, new.text, new.heading);
+        END
+    """)
+    conn.execute("""
+        CREATE TRIGGER IF NOT EXISTS fts_ad AFTER DELETE ON chunks BEGIN
+            INSERT INTO fts_chunks(fts_chunks, rowid, text, heading)
+            VALUES ('delete', old.id, old.text, old.heading);
+        END
+    """)
+    conn.execute("""
+        CREATE TRIGGER IF NOT EXISTS fts_au AFTER UPDATE ON chunks BEGIN
+            INSERT INTO fts_chunks(fts_chunks, rowid, text, heading)
+            VALUES ('delete', old.id, old.text, old.heading);
+            INSERT INTO fts_chunks(rowid, text, heading)
+            VALUES (new.id, new.text, new.heading);
+        END
     """)
     conn.commit()
     return conn

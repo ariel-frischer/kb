@@ -1,5 +1,6 @@
 """CLI entry point for kb."""
 
+import json
 import re
 import sqlite3
 import sys
@@ -43,8 +44,8 @@ Usage:
   kb sources                     List configured sources
   kb index [DIR...] [--no-size-limit]  Index sources (skip files > max_file_size_mb)
   kb allow <file>                Whitelist a large file for indexing
-  kb search "query" [k] [--threshold N]  Hybrid semantic + keyword search (default k=5, threshold=0.001)
-  kb ask "question" [k] [--threshold N]  RAG: search + rerank + answer (default k=8, threshold=0.001)
+  kb search "query" [k] [--threshold N] [--json]  Hybrid semantic + keyword search (default k=5)
+  kb ask "question" [k] [--threshold N] [--json]   RAG: search + rerank + answer (default k=8)
   kb similar <file> [k]          Find similar documents (no API call, default k=10)
   kb tag <file> tag1 [tag2...]   Add tags to a document
   kb untag <file> tag1 [tag2...]  Remove tags from a document
@@ -244,7 +245,13 @@ def _best_snippet(text: str, query: str, width: int = 500) -> str:
     return prefix + text[start:end] + suffix
 
 
-def cmd_search(query: str, cfg: Config, top_k: int = 5, threshold: float | None = None):
+def cmd_search(
+    query: str,
+    cfg: Config,
+    top_k: int = 5,
+    threshold: float | None = None,
+    json_output: bool = False,
+):
     if threshold is not None:
         cfg.search_threshold = threshold
     if not cfg.db_path.exists():
@@ -257,7 +264,7 @@ def cmd_search(query: str, cfg: Config, top_k: int = 5, threshold: float | None 
     clean_query, filters = parse_filters(query)
     has_filters = has_active_filters(filters)
 
-    if has_filters:
+    if not json_output and has_filters:
         print(f"Filters: {', '.join(f'{k}={v}' for k, v in filters.items() if v)}")
 
     t0 = time.time()
@@ -312,6 +319,38 @@ def cmd_search(query: str, cfg: Config, top_k: int = 5, threshold: float | None 
             if r["similarity"] is None or r["similarity"] >= cfg.search_threshold
         ]
 
+    conn.close()
+
+    if json_output:
+        out = {
+            "query": clean_query,
+            "timing_ms": {
+                "embed": round(embed_ms),
+                "vec": round(vec_ms),
+                "fts": round(fts_ms),
+            },
+            "candidates": {
+                "vec": len(vec_results),
+                "fts": len(fts_results),
+                "fused": len(results),
+            },
+            "results": [
+                {
+                    "rank": i + 1,
+                    "doc_path": r["doc_path"],
+                    "heading": r["heading"],
+                    "similarity": r["similarity"],
+                    "fts_rank": r.get("fts_rank"),
+                    "rrf_score": round(r["rrf_score"], 6),
+                    "sources": [s for s in ["vec", "fts"] if r[f"in_{s}"]],
+                    "text": r["text"],
+                }
+                for i, r in enumerate(results)
+            ],
+        }
+        print(json.dumps(out, ensure_ascii=False))
+        return
+
     print(f'Query: "{clean_query}"')
     print(f"Embed: {embed_ms:.0f}ms | Vec: {vec_ms:.1f}ms | FTS: {fts_ms:.1f}ms")
     print(
@@ -340,10 +379,14 @@ def cmd_search(query: str, cfg: Config, top_k: int = 5, threshold: float | None 
             print(f"    ({len(r['text'])} chars total)")
         print()
 
-    conn.close()
 
-
-def cmd_ask(question: str, cfg: Config, top_k: int = 8, threshold: float | None = None):
+def cmd_ask(
+    question: str,
+    cfg: Config,
+    top_k: int = 8,
+    threshold: float | None = None,
+    json_output: bool = False,
+):
     """Full RAG: hybrid retrieve -> filter -> LLM rerank -> confidence filter -> answer."""
     if threshold is not None:
         cfg.ask_threshold = threshold
@@ -357,7 +400,7 @@ def cmd_ask(question: str, cfg: Config, top_k: int = 8, threshold: float | None 
     clean_question, filters = parse_filters(question)
     has_filters = has_active_filters(filters)
 
-    if has_filters:
+    if not json_output and has_filters:
         print(f"Filters: {', '.join(f'{k}={v}' for k, v in filters.items() if v)}")
 
     t0 = time.time()
@@ -394,6 +437,7 @@ def cmd_ask(question: str, cfg: Config, top_k: int = 8, threshold: float | None 
         except sqlite3.OperationalError:
             pass
     fts_ms = (time.time() - t0) * 1000
+    search_ms = vec_ms + fts_ms
 
     results = rrf_fuse(vec_results, fts_results, cfg.rerank_fetch_k, cfg)
     fill_fts_only_results(conn, results)
@@ -411,9 +455,24 @@ def cmd_ask(question: str, cfg: Config, top_k: int = 8, threshold: float | None 
     ]
 
     if not filtered:
-        print(f"Q: {clean_question}")
-        print(f"(embed: {embed_ms:.0f}ms | search: {vec_ms + fts_ms:.1f}ms)")
-        print("\nNo relevant documents found.")
+        if json_output:
+            out = {
+                "question": clean_question,
+                "answer": None,
+                "model": cfg.chat_model,
+                "timing_ms": {
+                    "embed": round(embed_ms),
+                    "search": round(search_ms),
+                    "generate": 0,
+                },
+                "tokens": {"prompt": 0, "completion": 0},
+                "sources": [],
+            }
+            print(json.dumps(out, ensure_ascii=False))
+        else:
+            print(f"Q: {clean_question}")
+            print(f"(embed: {embed_ms:.0f}ms | search: {search_ms:.1f}ms)")
+            print("\nNo relevant documents found.")
         conn.close()
         return
 
@@ -469,9 +528,33 @@ def cmd_ask(question: str, cfg: Config, top_k: int = 8, threshold: float | None 
     gen_ms = (time.time() - t0) * 1000
     tokens = chat_resp.usage
 
+    conn.close()
+
+    if json_output:
+        out = {
+            "question": clean_question,
+            "answer": answer,
+            "model": cfg.chat_model,
+            "timing_ms": {
+                "embed": round(embed_ms),
+                "search": round(search_ms),
+                "generate": round(gen_ms),
+            },
+            "tokens": {
+                "prompt": tokens.prompt_tokens,
+                "completion": tokens.completion_tokens,
+            },
+            "sources": [
+                {"rank": i + 1, "doc_path": path, "heading": heading}
+                for i, (path, heading) in enumerate(source_entries)
+            ],
+        }
+        print(json.dumps(out, ensure_ascii=False))
+        return
+
     print(f"Q: {clean_question}")
     print(
-        f"(embed: {embed_ms:.0f}ms | search: {vec_ms + fts_ms:.1f}ms | generate: {gen_ms:.0f}ms)"
+        f"(embed: {embed_ms:.0f}ms | search: {search_ms:.1f}ms | generate: {gen_ms:.0f}ms)"
     )
     print(f"(model: {cfg.chat_model})")
     print(f"(tokens: {tokens.prompt_tokens} in / {tokens.completion_tokens} out)")
@@ -483,8 +566,6 @@ def cmd_ask(question: str, cfg: Config, top_k: int = 8, threshold: float | None 
             print(f"  [{i}] {path} > {heading}")
         else:
             print(f"  [{i}] {path}")
-
-    conn.close()
 
 
 def _resolve_doc_path(
@@ -847,8 +928,8 @@ _kb() {{
       init)
         COMPREPLY=( $(compgen -W "--project" -- "$cur") )
         ;;
-      ask)
-        COMPREPLY=( $(compgen -W "--threshold" -- "$cur") )
+      search|ask)
+        COMPREPLY=( $(compgen -W "--threshold --json" -- "$cur") )
         ;;
       completion)
         COMPREPLY=( $(compgen -W "zsh bash fish" -- "$cur") )
@@ -866,7 +947,9 @@ complete -F _kb kb""")
             "complete -c kb -n '__fish_seen_subcommand_from add remove index allow' -F"
         )
         print("complete -c kb -n '__fish_seen_subcommand_from init' -a '--project'")
-        print("complete -c kb -n '__fish_seen_subcommand_from ask' -a '--threshold'")
+        print(
+            "complete -c kb -n '__fish_seen_subcommand_from search ask' -a '--threshold --json'"
+        )
         print(
             "complete -c kb -n '__fish_seen_subcommand_from completion' -a 'zsh bash fish'"
         )
@@ -954,10 +1037,13 @@ def main():
         cmd_index(cfg, args[1:])
     elif cmd == "search":
         if len(args) < 2 or sub_help:
-            print('Usage: kb search "query" [k] [--threshold N]')
+            print('Usage: kb search "query" [k] [--threshold N] [--json]')
             sys.exit(0 if sub_help else 1)
         threshold = None
         search_args = list(args[1:])
+        json_out = "--json" in search_args
+        if json_out:
+            search_args.remove("--json")
         if "--threshold" in search_args:
             ti = search_args.index("--threshold")
             if ti + 1 < len(search_args):
@@ -967,13 +1053,18 @@ def main():
                 print("--threshold requires a value")
                 sys.exit(1)
         top_k = int(search_args[1]) if len(search_args) > 1 else 5
-        cmd_search(search_args[0], cfg, top_k, threshold=threshold)
+        cmd_search(
+            search_args[0], cfg, top_k, threshold=threshold, json_output=json_out
+        )
     elif cmd == "ask":
         if len(args) < 2 or sub_help:
-            print('Usage: kb ask "question" [k] [--threshold N]')
+            print('Usage: kb ask "question" [k] [--threshold N] [--json]')
             sys.exit(0 if sub_help else 1)
         threshold = None
         ask_args = list(args[1:])
+        json_out = "--json" in ask_args
+        if json_out:
+            ask_args.remove("--json")
         if "--threshold" in ask_args:
             ti = ask_args.index("--threshold")
             if ti + 1 < len(ask_args):
@@ -984,7 +1075,7 @@ def main():
                 sys.exit(1)
         question = ask_args[0]
         top_k = int(ask_args[1]) if len(ask_args) > 1 else 8
-        cmd_ask(question, cfg, top_k, threshold=threshold)
+        cmd_ask(question, cfg, top_k, threshold=threshold, json_output=json_out)
     elif cmd == "similar":
         if len(args) < 2 or sub_help:
             print("Usage: kb similar <file> [k]")

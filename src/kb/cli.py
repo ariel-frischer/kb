@@ -1,5 +1,7 @@
 """CLI entry point for kb."""
 
+import csv
+import io
 import json
 import re
 import sys

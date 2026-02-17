@@ -33,12 +33,14 @@ all = [
     "openpyxl",
     "striprtf",
     "mcp[cli]>=1.8.0",
+    "sentence-transformers",
 ]
 chunking = ["chonkie[hub]"]
 pdf = ["pymupdf"]
 office = ["python-docx", "python-pptx", "openpyxl"]
 rtf = ["striprtf"]
 mcp = ["mcp[cli]>=1.8.0"]
+rerank = ["sentence-transformers"]
 
 [project.scripts]
 kb = "kb.cli:main"

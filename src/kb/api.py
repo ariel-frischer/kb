@@ -11,7 +11,7 @@ from .config import Config
 from .db import connect
 from .embed import deserialize_f32, serialize_f32
 from .filters import apply_filters, has_active_filters, parse_filters
-from .rerank import llm_rerank
+from .rerank import rerank
 from .search import fill_fts_only_results, fts_escape, rrf_fuse
 
 
@@ -368,7 +368,7 @@ def ask_core(
             results = apply_filters(results, filters, conn)
 
         if len(results) > cfg.rerank_top_k:
-            results, rerank_info = llm_rerank(client, clean_question, results, cfg)
+            results, rerank_info = rerank(client, clean_question, results, cfg)
 
     filtered = [
         r

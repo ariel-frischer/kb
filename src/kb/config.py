@@ -44,6 +44,8 @@ sources = [
 # rrf_k = 60.0              # RRF smoothing constant
 # rerank_fetch_k = 20       # candidates to fetch for LLM rerank
 # rerank_top_k = 5          # how many to keep after rerank
+# rerank_method = "llm"     # "llm" (RankGPT, default) or "cross-encoder" (local, no API cost)
+# cross_encoder_model = "cross-encoder/ms-marco-MiniLM-L-6-v2"
 
 # Format options
 # index_code = false                # also index source code files (.py, .js, .ts, etc.)
@@ -100,6 +102,8 @@ class Config:
     max_file_size_mb: float = 10
     allowed_large_files: list[str] = field(default_factory=list)
     index_code: bool = False
+    rerank_method: str = "llm"  # "llm" (RankGPT) or "cross-encoder"
+    cross_encoder_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
 
     scope: str = "project"  # "global" or "project"
 

@@ -4,8 +4,12 @@ releases:
     added:
       - description: "Query expansion — generates keyword synonyms (FTS) and semantic rephrasings (vector) via local FLAN-T5 or LLM, fuses with multi-list weighted RRF (`--expand` / `--no-expand`)"
         commits: ["e04c35f", "a00068b"]
-      - description: "HyDE (Hypothetical Document Embeddings) — generates a hypothetical answer passage via LLM before vector search for improved retrieval on question-style queries"
+      - description: "HyDE (Hypothetical Document Embeddings) — generates a hypothetical answer passage before vector search for improved retrieval on question-style queries"
         commits: ["59fadc9", "a00068b"]
+      - description: "Local HyDE generation via transformers (Qwen/Qwen3-0.6B default) — no API cost alternative to LLM-based HyDE (`hyde_method = \"local\"`)"
+        commits: []
+      - description: "`local-llm` optional extra (transformers + torch) for local HyDE generation"
+        commits: []
       - description: "FTS-only keyword search command (`kb fts`) for fast, no-API searches"
         commits: ["2bfe417"]
       - description: "Positional rank bonuses in RRF fusion scoring"

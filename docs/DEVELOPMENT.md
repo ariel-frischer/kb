@@ -39,7 +39,7 @@ src/kb/
 ├── chunk.py       — Markdown + plain text chunking (chonkie or regex fallback)
 ├── embed.py       — OpenAI embedding helpers, batching, serialize/deserialize for sqlite-vec
 ├── extract.py     — Text extraction registry for 30+ formats (PDF, DOCX, EPUB, HTML, ODT, etc.)
-├── hyde.py        — HyDE: generates hypothetical answer passage via LLM for better vector retrieval
+├── hyde.py        — HyDE: generates hypothetical answer passage (local model or LLM API) for better vector retrieval
 ├── expand.py      — Query expansion: local (FLAN-T5) or LLM, generates keyword + semantic variants
 ├── search.py      — Hybrid search (vector + FTS5), RRF fusion, multi-list RRF for expansion
 ├── rerank.py      — Reranking: local cross-encoder (sentence-transformers) or LLM (RankGPT)
@@ -51,9 +51,9 @@ src/kb/
 
 **Indexing** (`kb index`): find files by extension → extract text (format-specific) → chunking → content-hash diff → embed new chunks → store in sqlite-vec (vec0) + FTS5
 
-**Search** (`kb search`): query → parse filters → [HyDE] → [expand] → embed (passage or query + expansion vec texts) → vector search + FTS5 (original + expansion queries) → multi-list weighted RRF (primary 2x, expansions 1x) → apply filters → results
+**Search** (`kb search`): query → parse filters → [HyDE (local or LLM)] → [expand] → embed (passage or query + expansion vec texts) → vector search + FTS5 (original + expansion queries) → multi-list weighted RRF (primary 2x, expansions 1x) → apply filters → results
 
-**Ask** (`kb ask`): BM25 probe → if shortcut: FTS only; else: [HyDE] → [expand] → embed + expansion batch → vec+fts (multi-query) → multi-list weighted RRF → rerank (cross-encoder or LLM) → confidence threshold → LLM generates answer from context
+**Ask** (`kb ask`): BM25 probe → if shortcut: FTS only; else: [HyDE (local or LLM)] → [expand] → embed + expansion batch → vec+fts (multi-query) → multi-list weighted RRF → rerank (cross-encoder or LLM) → confidence threshold → LLM generates answer from context
 
 **Similar** (`kb similar`): read chunk embeddings from vec0 → average into doc vector → KNN query → filter self → aggregate by doc → rank by similarity
 
@@ -62,7 +62,7 @@ src/kb/
 - **sqlite-vec `vec0` virtual table** — stores embeddings + text in auxiliary columns, avoiding JOINs at search time
 - **Reciprocal Rank Fusion** — combines vector and keyword rankings without needing score normalization
 - **FTS5 field weighting** — `doc_path` (10x), `heading` (2x), `text` (1x) via BM25 rank config; filepath matches strongly boost relevance
-- **HyDE (Hypothetical Document Embeddings)** — LLM generates a hypothetical answer passage before vector search, improving retrieval for question-style queries. FTS still uses original query. Graceful fallback on failure.
+- **HyDE (Hypothetical Document Embeddings)** — generates a hypothetical answer passage before vector search, improving retrieval for question-style queries. Two methods: `"llm"` (OpenAI API) or `"local"` (causal LM via transformers, default Qwen/Qwen3-0.6B, no API cost). FTS still uses original query. Graceful fallback on failure.
 - **Query expansion** — opt-in (`--expand`), generates keyword synonyms (`lex`) and semantic rephrasings (`vec`) via local FLAN-T5 or LLM, fused with primary results via multi-list weighted RRF
 - **Content-hash per chunk** — incremental indexing only re-embeds changed content
 - **Config walks up from cwd** — like `.gitignore`, so `kb` works from any subdirectory

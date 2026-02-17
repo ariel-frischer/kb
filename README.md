@@ -8,7 +8,7 @@ CLI RAG tool for your docs. Index 30+ document formats (markdown, PDF, DOCX, EPU
 ## Features
 
 - **Hybrid search** — vector similarity + FTS5 keyword search, fused with Reciprocal Rank Fusion (with rank bonuses)
-- **HyDE** — generates a hypothetical answer passage via LLM before vector search, improving retrieval for question-style queries (enabled by default, FTS still uses original query)
+- **HyDE** — generates a hypothetical answer passage before vector search, improving retrieval for question-style queries (local via transformers or LLM API; enabled by default, FTS still uses original query)
 - **Keyword-only search** — `kb fts` for instant BM25 results with zero API cost (filepath matches weighted 10x, headings 2x)
 - **Heading-aware chunking** — markdown split by heading hierarchy, each chunk carries ancestry
 - **Incremental indexing** — content-hash per chunk, only re-embeds changes
@@ -39,7 +39,8 @@ uv tool install --from "git+https://github.com/ariel-frischer/kb.git" "kb[pdf]" 
 uv tool install --from "git+https://github.com/ariel-frischer/kb.git" "kb[office]"    # + DOCX, PPTX, XLSX
 uv tool install --from "git+https://github.com/ariel-frischer/kb.git" "kb[rtf]"       # + RTF
 uv tool install --from "git+https://github.com/ariel-frischer/kb.git" "kb[rerank]"   # + local cross-encoder reranking
-uv tool install --from "git+https://github.com/ariel-frischer/kb.git" "kb[expand]"   # + local query expansion (FLAN-T5)
+uv tool install --from "git+https://github.com/ariel-frischer/kb.git" "kb[expand]"    # + local query expansion (FLAN-T5)
+uv tool install --from "git+https://github.com/ariel-frischer/kb.git" "kb[local-llm]" # + local HyDE generation (transformers + torch)
 ```
 
 Requires an OpenAI-compatible API. Set `OPENAI_API_KEY` in your environment (or in `~/.config/kb/secrets.toml`).
@@ -144,6 +145,8 @@ sources = [
 # cross_encoder_model = "cross-encoder/ms-marco-MiniLM-L-6-v2"
 # hyde_enabled = true       # generate hypothetical passage before vector search
 # hyde_model = ""           # LLM for HyDE ("" = use chat_model)
+# hyde_method = "llm"      # "llm" (OpenAI API) or "local" (transformers, no API cost)
+# hyde_local_model = "Qwen/Qwen3-0.6B"  # HF model for local HyDE method
 # query_expand = false     # generate keyword + semantic query expansions (also --expand flag)
 # expand_method = "local"  # "local" (FLAN-T5) or "llm" (OpenAI API)
 # expand_model = "google/flan-t5-small"  # model for local expand method
@@ -263,7 +266,7 @@ kb index
 
 kb search "query"
   1. Parse filters, strip from query
-  2. HyDE: generate hypothetical answer passage via LLM (if enabled)
+  2. HyDE: generate hypothetical answer passage (local model or LLM API, if enabled)
   3. [Expand]: generate keyword synonyms + semantic rephrasings (if --expand)
   4. Embed passage (or raw query) + expansion vec texts (single batch)
   5. Vector search (vec0 MATCH) + FTS5 keyword search (original + expansion queries)
@@ -280,7 +283,7 @@ kb fts "query"
 
 kb ask "question"
   1. BM25 probe — if top FTS hit is high-confidence, skip to step 7
-  2. HyDE: generate hypothetical answer passage via LLM (if enabled)
+  2. HyDE: generate hypothetical answer passage (local model or LLM API, if enabled)
   3. [Expand]: generate keyword synonyms + semantic rephrasings (if --expand)
   4. Same as search (with expansion), but over-fetch 20
   5. Apply filters

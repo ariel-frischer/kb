@@ -539,12 +539,17 @@ all = [
     { name = "python-pptx" },
     { name = "sentence-transformers" },
     { name = "striprtf" },
+    { name = "torch" },
     { name = "transformers" },
 ]
 chunking = [
     { name = "chonkie", extra = ["hub"] },
 ]
 expand = [
+    { name = "transformers" },
+]
+local-llm = [
+    { name = "torch" },
     { name = "transformers" },
 ]
 mcp = [
@@ -591,10 +596,13 @@ requires-dist = [
     { name = "sqlite-vec" },
     { name = "striprtf", marker = "extra == 'all'" },
     { name = "striprtf", marker = "extra == 'rtf'" },
+    { name = "torch", marker = "extra == 'all'", specifier = ">=2.0" },
+    { name = "torch", marker = "extra == 'local-llm'", specifier = ">=2.0" },
     { name = "transformers", marker = "extra == 'all'", specifier = ">=4.30" },
     { name = "transformers", marker = "extra == 'expand'", specifier = ">=4.30" },
+    { name = "transformers", marker = "extra == 'local-llm'", specifier = ">=4.30" },
 ]
-provides-extras = ["all", "chunking", "pdf", "office", "rtf", "mcp", "rerank", "expand"]
+provides-extras = ["all", "chunking", "pdf", "office", "rtf", "mcp", "rerank", "expand", "local-llm"]
 
 [package.metadata.requires-dev]
 dev = [

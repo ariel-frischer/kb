@@ -35,6 +35,7 @@ all = [
     "mcp[cli]>=1.8.0",
     "sentence-transformers>=3.0",
     "transformers>=4.30",
+    "torch>=2.0",
 ]
 chunking = ["chonkie[hub]"]
 pdf = ["pymupdf"]
@@ -43,6 +44,7 @@ rtf = ["striprtf"]
 mcp = ["mcp[cli]>=1.8.0"]
 rerank = ["sentence-transformers>=3.0"]
 expand = ["transformers>=4.30"]
+local-llm = ["transformers>=4.30", "torch>=2.0"]
 
 [project.scripts]
 kb = "kb.cli:main"

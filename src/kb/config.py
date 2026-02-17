@@ -50,6 +50,8 @@ sources = [
 # HyDE (Hypothetical Document Embeddings)
 # hyde_enabled = true                # generate hypothetical passage before vector search
 # hyde_model = ""                    # LLM for HyDE ("" = use chat_model)
+# hyde_method = "llm"               # "llm" (OpenAI API) or "local" (transformers, no API cost)
+# hyde_local_model = "Qwen/Qwen3-0.6B"  # HF model for local HyDE method
 
 # Query expansion (generate keyword synonyms + semantic rephrasings)
 # query_expand = false               # enable query expansion
@@ -124,6 +126,8 @@ class Config:
     cross_encoder_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
     hyde_enabled: bool = True  # generate hypothetical doc before vector search
     hyde_model: str = ""  # LLM for HyDE ("" = use chat_model)
+    hyde_method: str = "llm"  # "llm" (OpenAI API) or "local" (transformers)
+    hyde_local_model: str = "Qwen/Qwen3-0.6B"  # HF model for local HyDE
     query_expand: bool = False  # generate keyword + semantic query expansions
     expand_method: str = "local"  # "local" (FLAN-T5) or "llm" (OpenAI API)
     expand_model: str = "google/flan-t5-small"  # model for local expand method

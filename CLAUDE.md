@@ -48,7 +48,7 @@ Path resolution: `Config.doc_path_for_db()` computes stored paths — relative t
 - `db.py` — schema creation + `SCHEMA_VERSION` migration. Tables: `documents` (with `tags` column), `chunks`, `vec_chunks` (vec0 virtual table), `fts_chunks` (FTS5 with porter stemming + trigger-based sync from chunks). WAL mode + foreign keys enabled. v5→v6 rebuilds FTS with porter tokenizer; v4→v5 rebuilds FTS with triggers; v3→v4 uses ALTER TABLE; older versions drop-and-recreate.
 - `chunk.py` — markdown (heading-aware with ancestry tracking) + plain text chunking. Uses chonkie with overlap refinery when available, regex fallback otherwise. `embedding_text()` enriches chunks with file path + heading ancestry before embedding.
 - `search.py` — hybrid search: vector (vec0 MATCH) + FTS5 (AND + prefix matching), fused with score-weighted RRF (vec scaled by similarity, FTS by normalized BM25) with positional rank bonuses. `fill_fts_only_results()` backfills metadata for FTS-only hits.
-- `rerank.py` — RankGPT pattern: presents numbered passages to LLM, parses comma-separated ranking response. Returns `(results, rerank_info)` tuple.
+- `rerank.py` — Reranking dispatcher: `rerank()` routes to `cross_encoder_rerank()` (local, sentence-transformers) or `llm_rerank()` (RankGPT pattern) based on `cfg.rerank_method`. Cross-encoder uses GPU if available (CUDA > MPS > CPU), lazy-loads and caches model. Returns `(results, rerank_info)` tuple.
 - `filters.py` — inline filter syntax (`file:`, `type:`, `tag:`, `dt>`, `dt<`, `+"kw"`, `-"kw"`) parsed from query string, applied post-search
 - `embed.py` — thin OpenAI embedding wrapper, `serialize_f32()` / `deserialize_f32()` for sqlite-vec binary format
 
@@ -60,7 +60,7 @@ Path resolution: `Config.doc_path_for_db()` computes stored paths — relative t
 
 **FTS**: query → parse_filters → FTS5 MATCH → normalized BM25 scores → apply_filters → display (no embedding, instant)
 
-**Ask**: same as search but over-fetches (rerank_fetch_k=20) → LLM rerank → top rerank_top_k → confidence threshold → LLM generates answer. BM25 shortcut: if FTS top hit norm >= 0.85 with gap >= 0.15, skips embedding/vector/rerank entirely.
+**Ask**: same as search but over-fetches (rerank_fetch_k=20) → rerank (cross-encoder or LLM) → top rerank_top_k → confidence threshold → LLM generates answer. BM25 shortcut: if FTS top hit norm >= 0.85 with gap >= 0.15, skips embedding/vector/rerank entirely.
 
 **Similar**: resolve file → read chunk embeddings from vec0 → average into doc vector → KNN query → filter out source doc → aggregate best distance per doc → display
 
@@ -72,7 +72,7 @@ Path resolution: `Config.doc_path_for_db()` computes stored paths — relative t
 - **Score-weighted RRF with rank bonuses** — fusion weights vec results by `similarity / (k + rank) + bonus` and FTS by `norm_bm25 / (k + rank) + bonus` where `norm_bm25 = |score| / (1 + |score|)` and bonus is +0.05 for rank 0, +0.02 for ranks 1-2
 - **BM25 shortcut in ask** — probes top 2 FTS results before embedding; if top norm >= 0.85 with gap >= 0.15, skips embedding/vector/rerank and uses FTS results directly
 - **Schema versioning** — `SCHEMA_VERSION` in `meta` table; v5→v6 rebuilds FTS with porter tokenizer; v4→v5 rebuilds FTS with triggers; v3→v4 uses non-destructive ALTER TABLE; older upgrades drop and recreate all tables
-- **JSON output** — `search`, `fts`, and `ask` support `--json` flag for structured output (scripting/agent integration)
+- **Structured output** — `search`, `fts`, and `ask` support `--json`, `--csv`, and `--md` flags for structured output (JSON for scripting/agents, CSV for spreadsheets, markdown tables for docs/LLMs)
 - **Tags** — stored comma-separated in `documents.tags` column; auto-parsed from markdown YAML frontmatter during indexing; manually managed via `kb tag`/`kb untag`
 - **MCP server** — `kb mcp` / `kb-mcp` starts a Model Context Protocol server (stdio transport) exposing search/ask/fts/similar/status/list as tools for Claude Desktop, Claude Code, and other MCP clients. Optional dep: `mcp[cli]` (included in `kb[all]`)
 - **CLI/API split** — `api.py` contains all core logic (returns dicts), `cli.py` is a thin presentation layer. Both CLI and MCP server call the same core functions.

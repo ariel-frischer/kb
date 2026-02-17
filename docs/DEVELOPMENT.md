@@ -40,7 +40,7 @@ src/kb/
 ├── embed.py       — OpenAI embedding helpers, batching, serialize/deserialize for sqlite-vec
 ├── extract.py     — Text extraction registry for 30+ formats (PDF, DOCX, EPUB, HTML, ODT, etc.)
 ├── search.py      — Hybrid search (vector + FTS5), RRF fusion
-├── rerank.py      — LLM reranking (RankGPT pattern)
+├── rerank.py      — Reranking: local cross-encoder (sentence-transformers) or LLM (RankGPT)
 ├── filters.py     — Pre-search filter parsing + application (file:, type:, tag:, dt>, dt<, +"kw", -"kw")
 └── ingest.py      — File indexing pipeline (unified loop over all supported formats, frontmatter tag parsing)
 ```
@@ -51,7 +51,7 @@ src/kb/
 
 **Search** (`kb search`): query → parse filters → embed → vector search + FTS5 → RRF fusion → apply filters → results
 
-**Ask** (`kb ask`): same as search but over-fetches → LLM reranks top candidates → confidence threshold → LLM generates answer from context
+**Ask** (`kb ask`): same as search but over-fetches → reranks top candidates (cross-encoder or LLM) → confidence threshold → LLM generates answer from context
 
 **Similar** (`kb similar`): read chunk embeddings from vec0 → average into doc vector → KNN query → filter self → aggregate by doc → rank by similarity
 

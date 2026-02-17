@@ -50,9 +50,9 @@ Usage:
   kb sources                     List configured sources
   kb index [DIR...] [--no-size-limit]  Index sources (skip files > max_file_size_mb)
   kb allow <file>                Whitelist a large file for indexing
-  kb search "query" [k] [--threshold N] [--json]  Hybrid semantic + keyword search (default k=5)
-  kb fts "query" [k] [--json]          Keyword-only search (no embedding, instant)
-  kb ask "question" [k] [--threshold N] [--json]   RAG: search + rerank + answer (default k=8)
+  kb search "query" [k] [--threshold N] [--json|--csv|--md]  Hybrid semantic + keyword search (default k=5)
+  kb fts "query" [k] [--json|--csv|--md]          Keyword-only search (no embedding, instant)
+  kb ask "question" [k] [--threshold N] [--json|--csv|--md]   RAG: search + rerank + answer (default k=8)
   kb similar <file> [k]          Find similar documents (no API call, default k=10)
   kb tag <file> tag1 [tag2...]   Add tags to a document
   kb untag <file> tag1 [tag2...]  Remove tags from a document
@@ -251,12 +251,47 @@ def _best_snippet(text: str, query: str, width: int = 500) -> str:
     return prefix + text[start:end] + suffix
 
 
+# ---------------------------------------------------------------------------
+# Output formatters for --csv and --md
+# ---------------------------------------------------------------------------
+
+_OUTPUT_FLAGS = ("--json", "--csv", "--md")
+
+
+def _parse_output_format(args: list[str]) -> str | None:
+    """Extract and remove output format flag from args list. Returns format or None."""
+    for flag in _OUTPUT_FLAGS:
+        if flag in args:
+            args.remove(flag)
+            return flag.lstrip("-")
+    return None
+
+
+def _format_csv(rows: list[dict], columns: list[str]) -> str:
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=columns, extrasaction="ignore")
+    writer.writeheader()
+    writer.writerows(rows)
+    return buf.getvalue()
+
+
+def _format_md_table(rows: list[dict], columns: list[str]) -> str:
+    lines = ["| " + " | ".join(columns) + " |"]
+    lines.append("| " + " | ".join("---" for _ in columns) + " |")
+    for row in rows:
+        cells = [
+            str(row.get(c, "")).replace("|", "\\|").replace("\n", " ") for c in columns
+        ]
+        lines.append("| " + " | ".join(cells) + " |")
+    return "\n".join(lines)
+
+
 def cmd_search(
     query: str,
     cfg: Config,
     top_k: int = 5,
     threshold: float | None = None,
-    json_output: bool = False,
+    output_format: str | None = None,
 ):
     try:
         result = search_core(query, cfg, top_k, threshold)
@@ -264,8 +299,27 @@ def cmd_search(
         print(str(e))
         sys.exit(1)
 
-    if json_output:
+    if output_format == "json":
         print(json.dumps(result, ensure_ascii=False))
+        return
+
+    if output_format in ("csv", "md"):
+        cols = [
+            "rank",
+            "doc_path",
+            "heading",
+            "similarity",
+            "rrf_score",
+            "sources",
+            "text",
+        ]
+        rows = []
+        for r in result["results"]:
+            row = dict(r)
+            row["sources"] = "+".join(row.get("sources", []))
+            rows.append(row)
+        formatter = _format_csv if output_format == "csv" else _format_md_table
+        print(formatter(rows, cols), end="" if output_format == "csv" else "\n")
         return
 
     clean_query = result["query"]
@@ -304,7 +358,7 @@ def cmd_fts(
     query: str,
     cfg: Config,
     top_k: int = 5,
-    json_output: bool = False,
+    output_format: str | None = None,
 ):
     """FTS-only keyword search — no embedding, no API cost."""
     try:
@@ -316,8 +370,17 @@ def cmd_fts(
         print(str(e))
         sys.exit(1)
 
-    if json_output:
+    if output_format == "json":
         print(json.dumps(result, ensure_ascii=False))
+        return
+
+    if output_format in ("csv", "md"):
+        cols = ["rank", "doc_path", "heading", "bm25", "text"]
+        formatter = _format_csv if output_format == "csv" else _format_md_table
+        print(
+            formatter(result["results"], cols),
+            end="" if output_format == "csv" else "\n",
+        )
         return
 
     clean_query = result["query"]
@@ -346,7 +409,7 @@ def cmd_ask(
     cfg: Config,
     top_k: int = 8,
     threshold: float | None = None,
-    json_output: bool = False,
+    output_format: str | None = None,
 ):
     """Full RAG: hybrid retrieve -> filter -> LLM rerank -> confidence filter -> answer."""
     try:
@@ -355,7 +418,7 @@ def cmd_ask(
         print(str(e))
         sys.exit(1)
 
-    if json_output:
+    if output_format == "json":
         out = {
             "question": result["question"],
             "answer": result["answer"],
@@ -366,6 +429,21 @@ def cmd_ask(
             "sources": result["sources"],
         }
         print(json.dumps(out, ensure_ascii=False))
+        return
+
+    if output_format in ("csv", "md"):
+        cols = ["rank", "doc_path", "heading"]
+        header = (
+            f"# Answer\n\n{result['answer']}\n\n# Sources\n\n"
+            if output_format == "md"
+            else ""
+        )
+        formatter = _format_csv if output_format == "csv" else _format_md_table
+        body = formatter(result["sources"], cols)
+        if output_format == "md":
+            print(header + body)
+        else:
+            print(body, end="")
         return
 
     clean_question = result["question"]
@@ -665,10 +743,10 @@ _kb() {{
         COMPREPLY=( $(compgen -W "--project" -- "$cur") )
         ;;
       search|ask)
-        COMPREPLY=( $(compgen -W "--threshold --json" -- "$cur") )
+        COMPREPLY=( $(compgen -W "--threshold --json --csv --md" -- "$cur") )
         ;;
       fts)
-        COMPREPLY=( $(compgen -W "--json" -- "$cur") )
+        COMPREPLY=( $(compgen -W "--json --csv --md" -- "$cur") )
         ;;
       completion)
         COMPREPLY=( $(compgen -W "zsh bash fish" -- "$cur") )
@@ -689,9 +767,11 @@ complete -F _kb kb"""
         print("complete -c kb -n '__fish_seen_subcommand_from init' -a '--project'")
         print(
             "complete -c kb -n '__fish_seen_subcommand_from search ask' "
-            "-a '--threshold --json'"
+            "-a '--threshold --json --csv --md'"
         )
-        print("complete -c kb -n '__fish_seen_subcommand_from fts' -a '--json'")
+        print(
+            "complete -c kb -n '__fish_seen_subcommand_from fts' -a '--json --csv --md'"
+        )
         print(
             "complete -c kb -n '__fish_seen_subcommand_from completion' "
             "-a 'zsh bash fish'"
@@ -798,13 +878,11 @@ def main():
         cmd_index(cfg, args[1:])
     elif cmd == "search":
         if len(args) < 2 or sub_help:
-            print('Usage: kb search "query" [k] [--threshold N] [--json]')
+            print('Usage: kb search "query" [k] [--threshold N] [--json|--csv|--md]')
             sys.exit(0 if sub_help else 1)
         threshold = None
         search_args = list(args[1:])
-        json_out = "--json" in search_args
-        if json_out:
-            search_args.remove("--json")
+        out_fmt = _parse_output_format(search_args)
         if "--threshold" in search_args:
             ti = search_args.index("--threshold")
             if ti + 1 < len(search_args):
@@ -815,27 +893,23 @@ def main():
                 sys.exit(1)
         top_k = int(search_args[1]) if len(search_args) > 1 else 5
         cmd_search(
-            search_args[0], cfg, top_k, threshold=threshold, json_output=json_out
+            search_args[0], cfg, top_k, threshold=threshold, output_format=out_fmt
         )
     elif cmd == "fts":
         if len(args) < 2 or sub_help:
-            print('Usage: kb fts "query" [k] [--json]')
+            print('Usage: kb fts "query" [k] [--json|--csv|--md]')
             sys.exit(0 if sub_help else 1)
         fts_args = list(args[1:])
-        json_out = "--json" in fts_args
-        if json_out:
-            fts_args.remove("--json")
+        out_fmt = _parse_output_format(fts_args)
         top_k = int(fts_args[1]) if len(fts_args) > 1 else 5
-        cmd_fts(fts_args[0], cfg, top_k, json_output=json_out)
+        cmd_fts(fts_args[0], cfg, top_k, output_format=out_fmt)
     elif cmd == "ask":
         if len(args) < 2 or sub_help:
-            print('Usage: kb ask "question" [k] [--threshold N] [--json]')
+            print('Usage: kb ask "question" [k] [--threshold N] [--json|--csv|--md]')
             sys.exit(0 if sub_help else 1)
         threshold = None
         ask_args = list(args[1:])
-        json_out = "--json" in ask_args
-        if json_out:
-            ask_args.remove("--json")
+        out_fmt = _parse_output_format(ask_args)
         if "--threshold" in ask_args:
             ti = ask_args.index("--threshold")
             if ti + 1 < len(ask_args):
@@ -846,7 +920,7 @@ def main():
                 sys.exit(1)
         question = ask_args[0]
         top_k = int(ask_args[1]) if len(ask_args) > 1 else 8
-        cmd_ask(question, cfg, top_k, threshold=threshold, json_output=json_out)
+        cmd_ask(question, cfg, top_k, threshold=threshold, output_format=out_fmt)
     elif cmd == "similar":
         if len(args) < 2 or sub_help:
             print("Usage: kb similar <file> [k]")

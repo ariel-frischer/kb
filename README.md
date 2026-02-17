@@ -11,7 +11,7 @@ CLI RAG tool for your docs. Index 30+ document formats (markdown, PDF, DOCX, EPU
 - **Keyword-only search** — `kb fts` for instant BM25 results with zero API cost
 - **Heading-aware chunking** — markdown split by heading hierarchy, each chunk carries ancestry
 - **Incremental indexing** — content-hash per chunk, only re-embeds changes
-- **LLM rerank** — `ask` over-fetches candidates, LLM ranks by relevance, keeps the best
+- **Reranking** — `ask` over-fetches candidates, reranks by relevance (local cross-encoder or LLM), keeps the best
 - **Pre-search filters** — file globs, document type, tags, date ranges, keyword inclusion/exclusion
 - **Document tagging** — manual tags via `kb tag`, auto-parsed from markdown frontmatter
 - **Similar documents** — find related docs using stored embeddings (no API call)
@@ -36,6 +36,7 @@ uv tool install --from "git+https://github.com/ariel-frischer/kb.git" kb
 uv tool install --from "git+https://github.com/ariel-frischer/kb.git" "kb[pdf]"       # + PDF
 uv tool install --from "git+https://github.com/ariel-frischer/kb.git" "kb[office]"    # + DOCX, PPTX, XLSX
 uv tool install --from "git+https://github.com/ariel-frischer/kb.git" "kb[rtf]"       # + RTF
+uv tool install --from "git+https://github.com/ariel-frischer/kb.git" "kb[rerank]"   # + local cross-encoder reranking
 ```
 
 Requires an OpenAI-compatible API. Set `OPENAI_API_KEY` in your environment (or in `~/.config/kb/secrets.toml`).
@@ -79,9 +80,9 @@ kb add <dir> [dir...]          Add source directories
 kb remove <dir> [dir...]       Remove source directories
 kb sources                     List configured sources
 kb index [DIR...]              Index sources from config (or explicit dirs)
-kb search "query" [k] [--threshold N] [--json]  Hybrid search (default k=5)
-kb fts "query" [k] [--json]            Keyword-only search (instant, no API cost)
-kb ask "question" [k] [--threshold N] [--json]  RAG answer (default k=8, BM25 shortcut when confident)
+kb search "query" [k] [--threshold N] [--json|--csv|--md]  Hybrid search (default k=5)
+kb fts "query" [k] [--json|--csv|--md]            Keyword-only search (instant, no API cost)
+kb ask "question" [k] [--threshold N] [--json|--csv|--md]  RAG answer (default k=8, BM25 shortcut when confident)
 kb list                        Summary of indexed documents by type
 kb list --full                 List every indexed document with metadata
 kb similar <file> [k]          Find similar documents (no API call, default k=10)
@@ -136,6 +137,8 @@ sources = [
 # ask_threshold = 0.001         # min cosine similarity for `kb ask` (also --threshold flag)
 # rerank_fetch_k = 20
 # rerank_top_k = 5
+# rerank_method = "llm"     # "llm" (RankGPT) or "cross-encoder" (local, no API cost)
+# cross_encoder_model = "cross-encoder/ms-marco-MiniLM-L-6-v2"
 # index_code = false       # set true to also index source code files
 ```
 
@@ -269,7 +272,7 @@ kb ask "question"
   1. BM25 probe — if top FTS hit is high-confidence, skip to step 5
   2. Same as search, but over-fetch 20
   3. Apply filters
-  4. LLM rerank -> top 5
+  4. Rerank -> top 5 (cross-encoder or LLM)
   5. Confidence threshold
   6. LLM generates answer from context
 ```

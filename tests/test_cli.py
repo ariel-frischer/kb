@@ -5,7 +5,16 @@ from unittest.mock import patch
 
 import pytest
 
-from kb.cli import _best_snippet, cmd_add, cmd_init, cmd_remove, cmd_sources
+from kb.cli import (
+    _best_snippet,
+    _format_csv,
+    _format_md_table,
+    _parse_output_format,
+    cmd_add,
+    cmd_init,
+    cmd_remove,
+    cmd_sources,
+)
 from kb.config import (
     PROJECT_CONFIG_FILE,
     Config,
@@ -245,6 +254,88 @@ class TestBestSnippet:
         text = "x" * 600
         result = _best_snippet(text, "!@#$%", width=100)
         assert result == text[:100]
+
+
+class TestParseOutputFormat:
+    def test_json(self):
+        args = ["query", "--json"]
+        assert _parse_output_format(args) == "json"
+        assert args == ["query"]
+
+    def test_csv(self):
+        args = ["query", "--csv"]
+        assert _parse_output_format(args) == "csv"
+        assert args == ["query"]
+
+    def test_md(self):
+        args = ["query", "--md"]
+        assert _parse_output_format(args) == "md"
+        assert args == ["query"]
+
+    def test_none(self):
+        args = ["query", "--threshold", "0.5"]
+        assert _parse_output_format(args) is None
+        assert args == ["query", "--threshold", "0.5"]
+
+    def test_first_flag_wins(self):
+        args = ["query", "--json", "--csv"]
+        result = _parse_output_format(args)
+        assert result == "json"
+        assert "--csv" in args  # only first match removed
+
+
+class TestFormatCsv:
+    def _lines(self, text):
+        return [l.strip() for l in text.strip().splitlines()]
+
+    def test_basic(self):
+        rows = [{"a": 1, "b": "hello"}, {"a": 2, "b": "world"}]
+        result = _format_csv(rows, ["a", "b"])
+        lines = self._lines(result)
+        assert lines[0] == "a,b"
+        assert lines[1] == "1,hello"
+        assert lines[2] == "2,world"
+
+    def test_escapes_commas(self):
+        rows = [{"text": "hello, world"}]
+        result = _format_csv(rows, ["text"])
+        assert '"hello, world"' in result
+
+    def test_missing_column_empty(self):
+        rows = [{"a": 1}]
+        result = _format_csv(rows, ["a", "b"])
+        lines = self._lines(result)
+        assert lines[1] == "1,"
+
+    def test_empty_rows(self):
+        result = _format_csv([], ["a", "b"])
+        assert result.strip() == "a,b"
+
+
+class TestFormatMdTable:
+    def test_basic(self):
+        rows = [{"a": 1, "b": "hello"}]
+        result = _format_md_table(rows, ["a", "b"])
+        lines = result.split("\n")
+        assert lines[0] == "| a | b |"
+        assert lines[1] == "| --- | --- |"
+        assert lines[2] == "| 1 | hello |"
+
+    def test_escapes_pipes(self):
+        rows = [{"text": "a|b"}]
+        result = _format_md_table(rows, ["text"])
+        assert "a\\|b" in result
+
+    def test_replaces_newlines(self):
+        rows = [{"text": "line1\nline2"}]
+        result = _format_md_table(rows, ["text"])
+        assert "\n" not in result.split("\n")[2]
+        assert "line1 line2" in result
+
+    def test_empty_rows(self):
+        result = _format_md_table([], ["a", "b"])
+        lines = result.split("\n")
+        assert len(lines) == 2  # header + separator only
 
 
 class TestMainDispatch:

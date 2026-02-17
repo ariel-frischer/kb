@@ -86,6 +86,8 @@ sources = [
 # HyDE (Hypothetical Document Embeddings)
 # hyde_enabled = true                # generate hypothetical passage before vector search
 # hyde_model = ""                    # LLM for HyDE ("" = use chat_model)
+# hyde_method = "llm"               # "llm" (OpenAI API) or "local" (transformers, no API cost)
+# hyde_local_model = "Qwen/Qwen3-0.6B"  # HF model for local HyDE method
 
 # Query expansion (generate keyword synonyms + semantic rephrasings)
 # query_expand = false               # enable query expansion

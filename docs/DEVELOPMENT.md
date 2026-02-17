@@ -51,9 +51,9 @@ src/kb/
 
 **Indexing** (`kb index`): find files by extension → extract text (format-specific) → chunking → content-hash diff → embed new chunks → store in sqlite-vec (vec0) + FTS5
 
-**Search** (`kb search`): query → parse filters → [HyDE (local or LLM)] → [expand] → embed (passage or query + expansion vec texts) → vector search + FTS5 (original + expansion queries) → multi-list weighted RRF (primary 2x, expansions 1x) → apply filters → results
+**Search** (`kb search`): query → parse filters → [HyDE best-of-two: embed raw query + passage, keep better vec results] → [expand] → vector search + FTS5 (original + expansion queries) → multi-list weighted RRF (primary 2x, expansions 1x) → tag over-fetch if active → apply filters → results
 
-**Ask** (`kb ask`): BM25 probe → if shortcut: FTS only; else: [HyDE (local or LLM)] → [expand] → embed + expansion batch → vec+fts (multi-query) → multi-list weighted RRF → rerank (cross-encoder or LLM) → confidence threshold → LLM generates answer from context
+**Ask** (`kb ask`): BM25 probe (LIMIT 20, dedup by document) → if shortcut: FTS only; else: [HyDE best-of-two] → [expand] → vec+fts (multi-query) → multi-list weighted RRF → tag over-fetch → rerank (cross-encoder or LLM) → confidence threshold → LLM generates answer from context
 
 **Similar** (`kb similar`): read chunk embeddings from vec0 → average into doc vector → KNN query → filter self → aggregate by doc → rank by similarity
 
@@ -61,11 +61,12 @@ src/kb/
 
 - **sqlite-vec `vec0` virtual table** — stores embeddings + text in auxiliary columns, avoiding JOINs at search time
 - **Reciprocal Rank Fusion** — combines vector and keyword rankings without needing score normalization
-- **FTS5 field weighting** — `doc_path` (10x), `heading` (2x), `text` (1x) via BM25 rank config; filepath matches strongly boost relevance
-- **HyDE (Hypothetical Document Embeddings)** — generates a hypothetical answer passage before vector search, improving retrieval for question-style queries. Two methods: `"llm"` (OpenAI API) or `"local"` (causal LM via transformers, default Qwen/Qwen3-0.6B, no API cost). FTS still uses original query. Graceful fallback on failure.
+- **FTS5 field weighting** — `fts_path` (10x), `heading` (2x), `text` (1x) via BM25 rank config. `fts_path` stores last 2 path components to avoid IDF collapse from common prefixes; filepath matches strongly boost relevance
+- **HyDE best-of-two** — embeds both raw query and hypothetical passage in one batch, runs two vec queries, keeps whichever has better top-1 similarity. HyDE can only help, never hurt. Two methods: `"llm"` (OpenAI API) or `"local"` (causal LM via transformers, default Qwen/Qwen3-0.6B, no API cost). FTS still uses original query.
 - **Query expansion** — opt-in (`--expand`), generates keyword synonyms (`lex`) and semantic rephrasings (`vec`) via local FLAN-T5 or LLM, fused with primary results via multi-list weighted RRF
 - **Content-hash per chunk** — incremental indexing only re-embeds changed content
 - **Config walks up from cwd** — like `.gitignore`, so `kb` works from any subdirectory
+- **Project DB in XDG data dir** — project-mode databases live at `~/.local/share/kb/projects/<hash>/kb.db` (SHA-256 of config dir), keeping WAL sidecar files out of the project directory. Explicit `db = "..."` in `.kb.toml` overrides for backward compat
 - **Tags** — comma-separated in `documents.tags` column; auto-parsed from markdown YAML frontmatter, manually managed via `kb tag`/`kb untag`
 
 ## Changelog

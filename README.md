@@ -8,8 +8,8 @@ CLI RAG tool for your docs. Index 30+ document formats (markdown, PDF, DOCX, EPU
 ## Features
 
 - **Hybrid search** — vector similarity + FTS5 keyword search, fused with Reciprocal Rank Fusion (with rank bonuses)
-- **HyDE** — generates a hypothetical answer passage before vector search, improving retrieval for question-style queries (local via transformers or LLM API; enabled by default, FTS still uses original query)
-- **Keyword-only search** — `kb fts` for instant BM25 results with zero API cost (filepath matches weighted 10x, headings 2x)
+- **HyDE best-of-two** — generates a hypothetical answer passage, embeds both it and the raw query, keeps whichever vec result set is better (local via transformers or LLM API; enabled by default, can only help never hurt)
+- **Keyword-only search** — `kb fts` for instant BM25 results with zero API cost (truncated filepath matches weighted 10x, headings 2x)
 - **Heading-aware chunking** — markdown split by heading hierarchy, each chunk carries ancestry
 - **Incremental indexing** — content-hash per chunk, only re-embeds changes
 - **Query expansion** — generates keyword synonyms (for FTS) and semantic rephrasings (for vector search) via local FLAN-T5 or LLM, fuses all result lists with multi-list weighted RRF (`--expand`)
@@ -121,7 +121,7 @@ kb completion fish | source
 
 ### Project mode
 
-`kb init --project` creates `.kb.toml` in the current directory (found by walking up from cwd, like `.gitignore`) and a `.kb/` directory with `.gitignore` for the database. Database lives at `.kb/kb.db`; sources are relative to the config file. Project config takes precedence over global when both exist.
+`kb init --project` creates `.kb.toml` in the current directory (found by walking up from cwd, like `.gitignore`). Database lives at `~/.local/share/kb/projects/<hash>/kb.db` — no database files in the project directory. Sources are relative to the config file. Project config takes precedence over global when both exist.
 
 ### Config format
 
@@ -266,24 +266,23 @@ kb index
 
 kb search "query"
   1. Parse filters, strip from query
-  2. HyDE: generate hypothetical answer passage (local model or LLM API, if enabled)
+  2. HyDE best-of-two: embed both raw query + hypothetical passage, keep better vec results
   3. [Expand]: generate keyword synonyms + semantic rephrasings (if --expand)
-  4. Embed passage (or raw query) + expansion vec texts (single batch)
-  5. Vector search (vec0 MATCH) + FTS5 keyword search (original + expansion queries)
-  6. Fuse with multi-list weighted RRF (primary 2x, expansions 1x)
-  7. Apply filters
-  8. Display results
+  4. Vector search (vec0 MATCH) + FTS5 keyword search (original + expansion queries)
+  5. Fuse with multi-list weighted RRF (primary 2x, expansions 1x)
+  6. Apply filters (tag over-fetch ensures tagged docs aren't missed)
+  7. Display results
 
 kb fts "query"
   1. Parse filters, strip from query
-  2. FTS5 keyword search (no embedding, weighted BM25: filepath 10x, heading 2x)
+  2. FTS5 keyword search (no embedding, weighted BM25: truncated filepath 10x, heading 2x)
   3. Normalize BM25 scores
   4. Apply filters
   5. Display results (instant, zero API cost)
 
 kb ask "question"
-  1. BM25 probe — if top FTS hit is high-confidence, skip to step 7
-  2. HyDE: generate hypothetical answer passage (local model or LLM API, if enabled)
+  1. BM25 probe — dedup by document, if top doc is high-confidence, skip to step 7
+  2. HyDE best-of-two: embed both raw query + hypothetical passage, keep better vec results
   3. [Expand]: generate keyword synonyms + semantic rephrasings (if --expand)
   4. Same as search (with expansion), but over-fetch 20
   5. Apply filters

@@ -18,13 +18,27 @@ releases:
         commits: ["cce0a74"]
       - description: "FTS5 trigger-based sync with porter stemming tokenizer"
         commits: ["cce0a74", "5b145f1"]
-      - description: "FTS5 field weighting — doc_path (10x), heading (2x), text (1x) via weighted BM25 rank config"
-        commits: []
+      - description: "FTS5 field weighting — fts_path (10x), heading (2x), text (1x) via weighted BM25 rank config. fts_path stores last 2 path components to avoid IDF collapse"
+        commits: ["62e9c21"]
+      - description: "HyDE best-of-two — embeds both raw query and HyDE passage, keeps whichever vec result set has better top-1 similarity (HyDE can only help, never hurt)"
+        commits: ["62e9c21"]
+      - description: "Tag filter over-fetch — retrieval window expanded when tag: filter active to cover all tagged doc chunks"
+        commits: ["62e9c21"]
       - description: "MCP server exposing search/ask/fts/similar/status/list tools for AI agents"
         commits: ["5b145f1", "5d35d92"]
       - description: "Core API module (`api.py`) separating logic from CLI presentation"
         commits: ["5b145f1"]
     fixed:
+      - description: "HyDE no longer hurts vec search — best-of-two approach keeps raw query results when HyDE passage is off-domain"
+        commits: ["62e9c21"]
+      - description: "BM25 shortcut in ask now deduplicates by document before gap check (LIMIT 20, group by doc_path) — shortcut can actually fire"
+        commits: ["62e9c21"]
+      - description: "Tag filter no longer misses documents outside fixed top-k retrieval window — over-fetches to cover all tagged doc chunks"
+        commits: ["62e9c21"]
+      - description: "Fused candidate count now captured pre-filter; `after_filters` key added when filters active"
+        commits: ["62e9c21"]
+      - description: "Common path terms (e.g. project name in every doc_path) no longer get zero FTS weight — fts_path stores last 2 path components"
+        commits: ["62e9c21"]
       - description: "RRF fusion rank bonus application for accurate scoring"
         commits: ["6484412"]
       - description: "FTS escape to use AND queries with prefix matching"
@@ -32,8 +46,14 @@ releases:
       - description: "Enable WAL mode and foreign keys for better DB performance"
         commits: ["5b145f1"]
     changed:
-      - description: "Schema version upgraded from 4 to 7 (FTS triggers + porter tokenizer + field weighting)"
-        commits: ["cce0a74", "5b145f1"]
+      - description: "Project-mode DB moved to XDG data dir (`~/.local/share/kb/projects/<hash>/kb.db`) — no database files in project directory, WAL sidecar files no longer appear in git status"
+        commits: []
+      - description: "`kb init --project` no longer creates `.kb/` directory or `.gitignore`"
+        commits: []
+      - description: "`kb reset` now cleans up WAL sidecar files (`.db-shm`, `.db-wal`)"
+        commits: []
+      - description: "Schema version upgraded from 4 to 8 (FTS triggers + porter tokenizer + field weighting + fts_path truncation)"
+        commits: ["cce0a74", "5b145f1", "62e9c21"]
       - description: "CLI refactored to thin wrappers over `api.py` core functions"
         commits: ["5b145f1"]
       - description: "BM25 shortcut in ask skips embedding/vector/rerank when FTS results are high-confidence"
@@ -41,7 +61,7 @@ releases:
     removed: []
     deprecated: []
     breaking: []
-    migration: "Schema auto-migrates from v4→v5→v6→v7. v6→v7 adds doc_path column to chunks and rebuilds FTS with 3-column weighted BM25. FTS index is rebuilt automatically."
+    migration: "Schema auto-migrates from v4→v5→v6→v7→v8. v7→v8 adds fts_path column (last 2 path components) and rebuilds FTS using truncated paths. v6→v7 adds doc_path column to chunks and rebuilds FTS with 3-column weighted BM25. No reindex needed."
     contributors: ["ariel-frischer"]
 
   - version: "1.0.8"

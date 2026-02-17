@@ -33,6 +33,9 @@ def _get_config():
 def kb_search(query: str, top_k: int = 5, threshold: float | None = None) -> dict:
     """Hybrid semantic + keyword search over the knowledge base.
 
+    Uses HyDE (Hypothetical Document Embeddings) by default: generates a hypothetical
+    answer passage via LLM, embeds that for vector search. FTS uses original query.
+
     Supports inline filters in the query string:
       file:glob, type:name, tag:name, dt>"date", dt<"date", +"must", -"exclude"
 
@@ -51,7 +54,8 @@ def kb_search(query: str, top_k: int = 5, threshold: float | None = None) -> dic
 def kb_ask(question: str, top_k: int = 8, threshold: float | None = None) -> dict:
     """Ask a question and get a RAG-generated answer with source citations.
 
-    Full pipeline: hybrid search -> LLM rerank -> confidence filter -> LLM answer.
+    Full pipeline: [HyDE] -> hybrid search -> LLM rerank -> confidence filter -> LLM answer.
+    HyDE generates a hypothetical passage for better vector retrieval (skipped on BM25 shortcut).
     Supports the same inline filters as kb_search.
 
     Args:

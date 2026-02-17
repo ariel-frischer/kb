@@ -86,6 +86,129 @@ def rrf_fuse(
     return results
 
 
+def run_vec_query(
+    conn: sqlite3.Connection, emb_bytes: bytes, k: int
+) -> list[tuple]:
+    """Execute vec0 KNN search. Returns list of (chunk_id, distance, text, doc_path, heading)."""
+    rows = conn.execute(
+        "SELECT chunk_id, distance, chunk_text, doc_path, heading "
+        "FROM vec_chunks WHERE embedding MATCH ? AND k = ? ORDER BY distance",
+        (emb_bytes, k),
+    ).fetchall()
+    return [
+        (r["chunk_id"], r["distance"], r["chunk_text"], r["doc_path"], r["heading"])
+        for r in rows
+    ]
+
+
+def run_fts_query(
+    conn: sqlite3.Connection, query_str: str, limit: int
+) -> list[tuple]:
+    """Execute FTS5 search. Returns list of (chunk_id, fts_rank). Returns [] if no terms."""
+    fts_q = fts_escape(query_str)
+    if not fts_q:
+        return []
+    try:
+        rows = conn.execute(
+            "SELECT rowid, rank FROM fts_chunks WHERE fts_chunks MATCH ? ORDER BY rank LIMIT ?",
+            (fts_q, limit),
+        ).fetchall()
+        return [(r["rowid"], r["rank"]) for r in rows]
+    except sqlite3.OperationalError:
+        return []
+
+
+def normalize_vec_list(
+    vec_results: list[tuple],
+) -> list[dict]:
+    """Convert vec tuples -> [{"chunk_id", "score" (=similarity), "text", "doc_path", "heading"}]."""
+    return [
+        {
+            "chunk_id": chunk_id,
+            "score": 1.0 - distance,
+            "distance": distance,
+            "text": text,
+            "doc_path": doc_path,
+            "heading": heading,
+        }
+        for chunk_id, distance, text, doc_path, heading in vec_results
+    ]
+
+
+def normalize_fts_list(fts_results: list[tuple]) -> list[dict]:
+    """Convert FTS tuples -> [{"chunk_id", "score" (=norm_bm25)}]."""
+    return [
+        {
+            "chunk_id": chunk_id,
+            "score": abs(fts_rank) / (1.0 + abs(fts_rank)),
+            "fts_rank": fts_rank,
+        }
+        for chunk_id, fts_rank in fts_results
+    ]
+
+
+def multi_rrf_fuse(
+    scored_lists: list[list[dict]],
+    weights: list[float],
+    top_k: int,
+    rrf_k: float = 60.0,
+) -> list[dict]:
+    """N-list weighted RRF with rank bonuses.
+
+    Each scored_list is [{"chunk_id", "score", ...metadata}].
+    Accumulates: weight * score / (rrf_k + rank) per chunk across all lists.
+    Adds rank bonus based on best rank across all lists.
+
+    Returns same dict format as rrf_fuse for backward compat.
+    """
+    scores: dict[int, float] = {}
+    top_rank: dict[int, int] = {}
+    vec_data: dict[int, dict] = {}
+    fts_data: dict[int, float] = {}
+
+    for list_idx, (slist, weight) in enumerate(zip(scored_lists, weights)):
+        for rank, item in enumerate(slist):
+            cid = item["chunk_id"]
+            scores[cid] = scores.get(cid, 0) + weight * item["score"] / (rrf_k + rank)
+            top_rank[cid] = min(top_rank.get(cid, rank), rank)
+
+            # Collect metadata from vec-type lists (have "distance" key)
+            if "distance" in item and cid not in vec_data:
+                vec_data[cid] = {
+                    "distance": item["distance"],
+                    "text": item.get("text"),
+                    "doc_path": item.get("doc_path"),
+                    "heading": item.get("heading"),
+                }
+            if "fts_rank" in item:
+                fts_data[cid] = item["fts_rank"]
+
+    for cid in scores:
+        scores[cid] += _rank_bonus(top_rank[cid])
+
+    ranked = sorted(scores.items(), key=lambda x: -x[1])[:top_k]
+
+    results = []
+    for cid, rrf_score in ranked:
+        data = vec_data.get(cid)
+        results.append(
+            {
+                "chunk_id": cid,
+                "rrf_score": rrf_score,
+                "distance": data["distance"] if data else None,
+                "similarity": (1 - data["distance"]) if data else None,
+                "fts_rank": fts_data.get(cid),
+                "text": data["text"] if data else None,
+                "doc_path": data["doc_path"] if data else None,
+                "heading": data["heading"] if data else None,
+                "in_fts": cid in fts_data,
+                "in_vec": data is not None,
+            }
+        )
+
+    return results
+
+
 def fill_fts_only_results(conn: sqlite3.Connection, results: list[dict]):
     """Backfill text/metadata for results that came only from FTS."""
     for r in results:

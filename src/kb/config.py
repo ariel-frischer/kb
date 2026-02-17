@@ -51,6 +51,11 @@ sources = [
 # hyde_enabled = true                # generate hypothetical passage before vector search
 # hyde_model = ""                    # LLM for HyDE ("" = use chat_model)
 
+# Query expansion (generate keyword synonyms + semantic rephrasings)
+# query_expand = false               # enable query expansion
+# expand_method = "local"            # "local" (FLAN-T5, no API cost) or "llm" (OpenAI API)
+# expand_model = "google/flan-t5-small"  # model for local expand method
+
 # Format options
 # index_code = false                # also index source code files (.py, .js, .ts, etc.)
 
@@ -79,6 +84,11 @@ sources = [
 # HyDE (Hypothetical Document Embeddings)
 # hyde_enabled = true                # generate hypothetical passage before vector search
 # hyde_model = ""                    # LLM for HyDE ("" = use chat_model)
+
+# Query expansion (generate keyword synonyms + semantic rephrasings)
+# query_expand = false               # enable query expansion
+# expand_method = "local"            # "local" (FLAN-T5, no API cost) or "llm" (OpenAI API)
+# expand_model = "google/flan-t5-small"  # model for local expand method
 
 # Format options
 # index_code = false                # also index source code files (.py, .js, .ts, etc.)
@@ -114,6 +124,9 @@ class Config:
     cross_encoder_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
     hyde_enabled: bool = True  # generate hypothetical doc before vector search
     hyde_model: str = ""  # LLM for HyDE ("" = use chat_model)
+    query_expand: bool = False  # generate keyword + semantic query expansions
+    expand_method: str = "local"  # "local" (FLAN-T5) or "llm" (OpenAI API)
+    expand_model: str = "google/flan-t5-small"  # model for local expand method
 
     scope: str = "project"  # "global" or "project"
 

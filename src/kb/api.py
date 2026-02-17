@@ -9,11 +9,21 @@ from openai import OpenAI
 
 from .config import Config
 from .db import connect
-from .embed import deserialize_f32, serialize_f32
+from .embed import deserialize_f32, embed_batch, serialize_f32
+from .expand import expand_query
 from .filters import apply_filters, has_active_filters, parse_filters
 from .hyde import generate_hyde_passage
 from .rerank import rerank
-from .search import fill_fts_only_results, fts_escape, rrf_fuse
+from .search import (
+    fill_fts_only_results,
+    fts_escape,
+    multi_rrf_fuse,
+    normalize_fts_list,
+    normalize_vec_list,
+    rrf_fuse,
+    run_fts_query,
+    run_vec_query,
+)
 
 
 # ---------------------------------------------------------------------------

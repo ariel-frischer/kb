@@ -280,14 +280,20 @@ class TestCmdAsk:
         populated_db.rerank_top_k = 1  # force rerank to trigger
         client = _mock_openai_client(embed_dims=4)
 
+        # HyDE response
+        hyde_resp = MagicMock()
+        hyde_resp.choices = [MagicMock()]
+        hyde_resp.choices[0].message.content = "A hypothetical passage."
+
         # Rerank response
         rerank_resp = MagicMock()
         rerank_resp.choices = [MagicMock()]
         rerank_resp.choices[0].message.content = "1, 2"
         rerank_resp.usage = MagicMock(prompt_tokens=100, completion_tokens=10)
 
-        # chat.completions.create called twice: rerank then answer
+        # chat.completions.create called three times: HyDE, rerank, answer
         client.chat.completions.create.side_effect = [
+            hyde_resp,
             rerank_resp,
             client.chat.completions.create.return_value,
         ]
@@ -295,7 +301,7 @@ class TestCmdAsk:
         with patch("kb.api.OpenAI", return_value=client):
             cmd_ask("question", populated_db, top_k=5)
 
-        assert client.chat.completions.create.call_count == 2
+        assert client.chat.completions.create.call_count == 3
 
     def test_ask_no_results_above_threshold(self, tmp_path, capsys):
         """When all results have similarity below threshold, show 'no relevant documents'."""

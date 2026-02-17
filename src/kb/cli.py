@@ -456,9 +456,10 @@ def cmd_ask(
         print(f"Filters: {', '.join(f'{k}={v}' for k, v in result['filters'].items())}")
 
     shortcut_tag = " (bm25 shortcut)" if bm25_shortcut else ""
+    hyde_tag = f"hyde: {timing['hyde']}ms | " if timing.get("hyde") else ""
     print(f"Q: {clean_question}")
     print(
-        f"(embed: {timing['embed']}ms | search: {timing['search']}ms | generate: {timing['generate']}ms{shortcut_tag})"
+        f"({hyde_tag}embed: {timing['embed']}ms | search: {timing['search']}ms | generate: {timing['generate']}ms{shortcut_tag})"
     )
 
     if result["answer"] is None:

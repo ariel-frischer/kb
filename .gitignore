@@ -17,4 +17,6 @@ dist/
 secrets.yaml
 secrets.toml
 *.db
+*.db-shm
+*.db-wal
 docs/internal/

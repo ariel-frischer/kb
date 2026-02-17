@@ -14,6 +14,15 @@ def fts_escape(query: str) -> str | None:
     return " OR ".join(f'"{w}"' for w in words)
 
 
+def _rank_bonus(rank: int) -> float:
+    """Positional bonus for top-ranked results."""
+    if rank == 0:
+        return 0.05
+    if rank <= 2:
+        return 0.02
+    return 0.0
+
+
 def rrf_fuse(
     vec_results: list[tuple],
     fts_results: list[tuple],
@@ -31,7 +40,11 @@ def rrf_fuse(
 
     for rank, (chunk_id, distance, text, doc_path, heading) in enumerate(vec_results):
         similarity = 1.0 - distance
-        scores[chunk_id] = scores.get(chunk_id, 0) + similarity / (cfg.rrf_k + rank)
+        scores[chunk_id] = (
+            scores.get(chunk_id, 0)
+            + similarity / (cfg.rrf_k + rank)
+            + _rank_bonus(rank)
+        )
         vec_data[chunk_id] = {
             "distance": distance,
             "text": text,
@@ -42,7 +55,9 @@ def rrf_fuse(
     for rank, (chunk_id, fts_rank) in enumerate(fts_results):
         abs_rank = abs(fts_rank)
         norm_bm25 = abs_rank / (1.0 + abs_rank)
-        scores[chunk_id] = scores.get(chunk_id, 0) + norm_bm25 / (cfg.rrf_k + rank)
+        scores[chunk_id] = (
+            scores.get(chunk_id, 0) + norm_bm25 / (cfg.rrf_k + rank) + _rank_bonus(rank)
+        )
         fts_data[chunk_id] = fts_rank
 
     ranked = sorted(scores.items(), key=lambda x: -x[1])[:top_k]

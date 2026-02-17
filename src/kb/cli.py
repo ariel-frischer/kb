@@ -45,6 +45,7 @@ Usage:
   kb index [DIR...] [--no-size-limit]  Index sources (skip files > max_file_size_mb)
   kb allow <file>                Whitelist a large file for indexing
   kb search "query" [k] [--threshold N] [--json]  Hybrid semantic + keyword search (default k=5)
+  kb fts "query" [k] [--json]          Keyword-only search (no embedding, instant)
   kb ask "question" [k] [--threshold N] [--json]   RAG: search + rerank + answer (default k=8)
   kb similar <file> [k]          Find similar documents (no API call, default k=10)
   kb tag <file> tag1 [tag2...]   Add tags to a document
@@ -380,6 +381,103 @@ def cmd_search(
         print()
 
 
+def cmd_fts(
+    query: str,
+    cfg: Config,
+    top_k: int = 5,
+    json_output: bool = False,
+):
+    """FTS-only keyword search — no embedding, no API cost."""
+    if not cfg.db_path.exists():
+        print("No index found. Run 'kb index' first.")
+        sys.exit(1)
+
+    conn = connect(cfg)
+
+    clean_query, filters = parse_filters(query)
+    has_filters = has_active_filters(filters)
+
+    if not json_output and has_filters:
+        print(f"Filters: {', '.join(f'{k}={v}' for k, v in filters.items() if v)}")
+
+    fts_q = fts_escape(clean_query)
+    if not fts_q:
+        print("No searchable terms in query.")
+        conn.close()
+        sys.exit(1)
+
+    t0 = time.time()
+    try:
+        fts_rows = conn.execute(
+            "SELECT rowid, rank FROM fts_chunks WHERE fts_chunks MATCH ? ORDER BY rank LIMIT ?",
+            (fts_q, top_k * 5 if has_filters else top_k),
+        ).fetchall()
+    except sqlite3.OperationalError:
+        print("FTS index not available. Re-run 'kb index'.")
+        conn.close()
+        sys.exit(1)
+    fts_ms = (time.time() - t0) * 1000
+
+    results = []
+    for chunk_id, fts_rank in [(r["rowid"], r["rank"]) for r in fts_rows]:
+        abs_rank = abs(fts_rank)
+        norm_bm25 = abs_rank / (1.0 + abs_rank)
+        results.append(
+            {
+                "chunk_id": chunk_id,
+                "rrf_score": norm_bm25,
+                "distance": None,
+                "similarity": None,
+                "fts_rank": fts_rank,
+                "text": None,
+                "doc_path": None,
+                "heading": None,
+                "in_fts": True,
+                "in_vec": False,
+            }
+        )
+    fill_fts_only_results(conn, results)
+
+    if has_filters:
+        results = apply_filters(results, filters, conn)
+
+    results = results[:top_k]
+    conn.close()
+
+    if json_output:
+        out = {
+            "query": clean_query,
+            "timing_ms": {"fts": round(fts_ms)},
+            "results": [
+                {
+                    "rank": i + 1,
+                    "doc_path": r["doc_path"],
+                    "heading": r["heading"],
+                    "bm25": round(r["rrf_score"], 4),
+                    "fts_rank": r["fts_rank"],
+                    "text": r["text"],
+                }
+                for i, r in enumerate(results)
+            ],
+        }
+        print(json.dumps(out, ensure_ascii=False))
+        return
+
+    print(f'Query: "{clean_query}"')
+    print(f"FTS: {fts_ms:.1f}ms | {len(results)} results\n")
+
+    for i, r in enumerate(results):
+        bm25_str = f"bm25:{r['rrf_score']:.3f}"
+        print(f"--- [{i + 1}] {r['doc_path']} ({bm25_str}) ---")
+        if r["heading"]:
+            print(f"    Section: {r['heading']}")
+        preview = _best_snippet(r["text"] or "", clean_query).replace("\n", "\n    ")
+        print(f"    {preview}")
+        if r["text"] and len(r["text"]) > 500:
+            print(f"    ({len(r['text'])} chars total)")
+        print()
+
+
 def cmd_ask(
     question: str,
     cfg: Config,
@@ -403,50 +501,100 @@ def cmd_ask(
     if not json_output and has_filters:
         print(f"Filters: {', '.join(f'{k}={v}' for k, v in filters.items() if v)}")
 
-    t0 = time.time()
-    resp = client.embeddings.create(
-        model=cfg.embed_model, input=[clean_question], dimensions=cfg.embed_dims
-    )
-    query_emb = resp.data[0].embedding
-    embed_ms = (time.time() - t0) * 1000
-
-    retrieve_k = max(cfg.rerank_fetch_k, top_k * 3)
-
-    t0 = time.time()
-    vec_rows = conn.execute(
-        "SELECT chunk_id, distance, chunk_text, doc_path, heading "
-        "FROM vec_chunks WHERE embedding MATCH ? AND k = ? ORDER BY distance",
-        (serialize_f32(query_emb), retrieve_k),
-    ).fetchall()
-    vec_results = [
-        (r["chunk_id"], r["distance"], r["chunk_text"], r["doc_path"], r["heading"])
-        for r in vec_rows
-    ]
-    vec_ms = (time.time() - t0) * 1000
-
-    t0 = time.time()
+    # BM25 shortcut: skip embedding + vector + rerank when FTS is high-confidence
+    bm25_shortcut = False
     fts_q = fts_escape(clean_question)
-    fts_results = []
-    if fts_q:
+    if fts_q and not has_filters:
         try:
-            fts_rows = conn.execute(
-                "SELECT rowid, rank FROM fts_chunks WHERE fts_chunks MATCH ? ORDER BY rank LIMIT ?",
-                (fts_q, retrieve_k),
+            probe = conn.execute(
+                "SELECT rowid, rank FROM fts_chunks WHERE fts_chunks MATCH ? ORDER BY rank LIMIT 2",
+                (fts_q,),
             ).fetchall()
-            fts_results = [(r["rowid"], r["rank"]) for r in fts_rows]
+            if probe:
+                top_norm = abs(probe[0]["rank"]) / (1.0 + abs(probe[0]["rank"]))
+                second_norm = (
+                    abs(probe[1]["rank"]) / (1.0 + abs(probe[1]["rank"]))
+                    if len(probe) > 1
+                    else 0.0
+                )
+                if top_norm >= 0.85 and (top_norm - second_norm) >= 0.15:
+                    bm25_shortcut = True
         except sqlite3.OperationalError:
             pass
-    fts_ms = (time.time() - t0) * 1000
-    search_ms = vec_ms + fts_ms
 
-    results = rrf_fuse(vec_results, fts_results, cfg.rerank_fetch_k, cfg)
-    fill_fts_only_results(conn, results)
+    if bm25_shortcut:
+        t0 = time.time()
+        fts_rows = conn.execute(
+            "SELECT rowid, rank FROM fts_chunks WHERE fts_chunks MATCH ? ORDER BY rank LIMIT ?",
+            (fts_q, top_k),
+        ).fetchall()
+        fts_results = [(r["rowid"], r["rank"]) for r in fts_rows]
+        search_ms = (time.time() - t0) * 1000
+        embed_ms = 0.0
 
-    if has_filters:
-        results = apply_filters(results, filters, conn)
+        results = []
+        for chunk_id, fts_rank in fts_results:
+            abs_rank = abs(fts_rank)
+            norm_bm25 = abs_rank / (1.0 + abs_rank)
+            results.append(
+                {
+                    "chunk_id": chunk_id,
+                    "rrf_score": norm_bm25,
+                    "distance": None,
+                    "similarity": None,
+                    "fts_rank": fts_rank,
+                    "text": None,
+                    "doc_path": None,
+                    "heading": None,
+                    "in_fts": True,
+                    "in_vec": False,
+                }
+            )
+        fill_fts_only_results(conn, results)
+    else:
+        t0 = time.time()
+        resp = client.embeddings.create(
+            model=cfg.embed_model, input=[clean_question], dimensions=cfg.embed_dims
+        )
+        query_emb = resp.data[0].embedding
+        embed_ms = (time.time() - t0) * 1000
 
-    if len(results) > cfg.rerank_top_k:
-        results = llm_rerank(client, clean_question, results, cfg)
+        retrieve_k = max(cfg.rerank_fetch_k, top_k * 3)
+
+        t0 = time.time()
+        vec_rows = conn.execute(
+            "SELECT chunk_id, distance, chunk_text, doc_path, heading "
+            "FROM vec_chunks WHERE embedding MATCH ? AND k = ? ORDER BY distance",
+            (serialize_f32(query_emb), retrieve_k),
+        ).fetchall()
+        vec_results = [
+            (r["chunk_id"], r["distance"], r["chunk_text"], r["doc_path"], r["heading"])
+            for r in vec_rows
+        ]
+        vec_ms = (time.time() - t0) * 1000
+
+        t0 = time.time()
+        fts_results = []
+        if fts_q:
+            try:
+                fts_rows = conn.execute(
+                    "SELECT rowid, rank FROM fts_chunks WHERE fts_chunks MATCH ? ORDER BY rank LIMIT ?",
+                    (fts_q, retrieve_k),
+                ).fetchall()
+                fts_results = [(r["rowid"], r["rank"]) for r in fts_rows]
+            except sqlite3.OperationalError:
+                pass
+        fts_ms = (time.time() - t0) * 1000
+        search_ms = vec_ms + fts_ms
+
+        results = rrf_fuse(vec_results, fts_results, cfg.rerank_fetch_k, cfg)
+        fill_fts_only_results(conn, results)
+
+        if has_filters:
+            results = apply_filters(results, filters, conn)
+
+        if len(results) > cfg.rerank_top_k:
+            results = llm_rerank(client, clean_question, results, cfg)
 
     filtered = [
         r
@@ -460,6 +608,7 @@ def cmd_ask(
                 "question": clean_question,
                 "answer": None,
                 "model": cfg.chat_model,
+                "bm25_shortcut": bm25_shortcut,
                 "timing_ms": {
                     "embed": round(embed_ms),
                     "search": round(search_ms),
@@ -470,8 +619,11 @@ def cmd_ask(
             }
             print(json.dumps(out, ensure_ascii=False))
         else:
+            shortcut_tag = " (bm25 shortcut)" if bm25_shortcut else ""
             print(f"Q: {clean_question}")
-            print(f"(embed: {embed_ms:.0f}ms | search: {search_ms:.1f}ms)")
+            print(
+                f"(embed: {embed_ms:.0f}ms | search: {search_ms:.1f}ms{shortcut_tag})"
+            )
             print("\nNo relevant documents found.")
         conn.close()
         return
@@ -535,6 +687,7 @@ def cmd_ask(
             "question": clean_question,
             "answer": answer,
             "model": cfg.chat_model,
+            "bm25_shortcut": bm25_shortcut,
             "timing_ms": {
                 "embed": round(embed_ms),
                 "search": round(search_ms),
@@ -553,8 +706,9 @@ def cmd_ask(
         return
 
     print(f"Q: {clean_question}")
+    shortcut_tag = " (bm25 shortcut)" if bm25_shortcut else ""
     print(
-        f"(embed: {embed_ms:.0f}ms | search: {search_ms:.1f}ms | generate: {gen_ms:.0f}ms)"
+        f"(embed: {embed_ms:.0f}ms | search: {search_ms:.1f}ms | generate: {gen_ms:.0f}ms{shortcut_tag})"
     )
     print(f"(model: {cfg.chat_model})")
     print(f"(tokens: {tokens.prompt_tokens} in / {tokens.completion_tokens} out)")
@@ -901,7 +1055,7 @@ def cmd_list(cfg: Config, full: bool = False):
 
 
 def cmd_completion(shell: str):
-    subcommands = "init add remove sources index allow search ask similar tag untag tags stats reset list version completion"
+    subcommands = "init add remove sources index allow search fts ask similar tag untag tags stats reset list version completion"
 
     if shell == "zsh":
         print(f"""\
@@ -931,6 +1085,9 @@ _kb() {{
       search|ask)
         COMPREPLY=( $(compgen -W "--threshold --json" -- "$cur") )
         ;;
+      fts)
+        COMPREPLY=( $(compgen -W "--json" -- "$cur") )
+        ;;
       completion)
         COMPREPLY=( $(compgen -W "zsh bash fish" -- "$cur") )
         ;;
@@ -950,6 +1107,7 @@ complete -F _kb kb""")
         print(
             "complete -c kb -n '__fish_seen_subcommand_from search ask' -a '--threshold --json'"
         )
+        print("complete -c kb -n '__fish_seen_subcommand_from fts' -a '--json'")
         print(
             "complete -c kb -n '__fish_seen_subcommand_from completion' -a 'zsh bash fish'"
         )
@@ -1056,6 +1214,16 @@ def main():
         cmd_search(
             search_args[0], cfg, top_k, threshold=threshold, json_output=json_out
         )
+    elif cmd == "fts":
+        if len(args) < 2 or sub_help:
+            print('Usage: kb fts "query" [k] [--json]')
+            sys.exit(0 if sub_help else 1)
+        fts_args = list(args[1:])
+        json_out = "--json" in fts_args
+        if json_out:
+            fts_args.remove("--json")
+        top_k = int(fts_args[1]) if len(fts_args) > 1 else 5
+        cmd_fts(fts_args[0], cfg, top_k, json_output=json_out)
     elif cmd == "ask":
         if len(args) < 2 or sub_help:
             print('Usage: kb ask "question" [k] [--threshold N] [--json]')

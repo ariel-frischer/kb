@@ -36,8 +36,8 @@ class TestRrfFuse:
         assert results[0]["in_vec"] is True
         assert results[0]["in_fts"] is False
         assert results[0]["similarity"] == pytest.approx(0.8)
-        # Score-weighted: similarity / (k + rank) = 0.8 / 60
-        assert results[0]["rrf_score"] == pytest.approx(0.8 / 60.0)
+        # Score-weighted: similarity / (k + rank) + rank_bonus = 0.8 / 60 + 0.05
+        assert results[0]["rrf_score"] == pytest.approx(0.8 / 60.0 + 0.05)
 
     def test_fts_only(self):
         cfg = Config(rrf_k=60.0)
@@ -50,8 +50,8 @@ class TestRrfFuse:
         assert results[0]["in_vec"] is False
         assert results[0]["text"] is None  # no vec data
         assert results[0]["fts_rank"] == -1.5
-        # norm_bm25 = 1.5 / (1 + 1.5) = 0.6
-        assert results[0]["rrf_score"] == pytest.approx(0.6 / 60.0)
+        # norm_bm25 = 1.5 / (1 + 1.5) = 0.6, + rank_bonus(0) = 0.05
+        assert results[0]["rrf_score"] == pytest.approx(0.6 / 60.0 + 0.05)
 
     def test_overlap_boosts_score(self):
         cfg = Config(rrf_k=60.0)
@@ -59,9 +59,9 @@ class TestRrfFuse:
         fts = [(1, -2.0)]
         results = rrf_fuse(vec, fts, top_k=5, cfg=cfg)
         assert len(results) == 1
-        # Vec: similarity(0.7) / 60, FTS: norm_bm25(2/3) / 60
-        vec_contrib = 0.7 / 60.0
-        fts_contrib = (2.0 / 3.0) / 60.0
+        # Vec: similarity(0.7) / 60 + 0.05, FTS: norm_bm25(2/3) / 60 + 0.05
+        vec_contrib = 0.7 / 60.0 + 0.05
+        fts_contrib = (2.0 / 3.0) / 60.0 + 0.05
         assert results[0]["rrf_score"] == pytest.approx(vec_contrib + fts_contrib)
         assert results[0]["in_vec"] is True
         assert results[0]["in_fts"] is True
@@ -105,10 +105,20 @@ class TestRrfFuse:
         assert results_high[0]["rrf_score"] > results_low[0]["rrf_score"]
         # Verify normalization bounds: norm_bm25 is always in (0, 1)
         # High: 10/(1+10) = 0.909..., Low: 0.1/(1+0.1) = 0.0909...
-        expected_high = (10.0 / 11.0) / 60.0
-        expected_low = (0.1 / 1.1) / 60.0
+        expected_high = (10.0 / 11.0) / 60.0 + 0.05
+        expected_low = (0.1 / 1.1) / 60.0 + 0.05
         assert results_high[0]["rrf_score"] == pytest.approx(expected_high)
         assert results_low[0]["rrf_score"] == pytest.approx(expected_low)
+
+    def test_rank_bonus_decreases(self):
+        """Rank 0 bonus > rank 1 bonus > rank 3 bonus (zero)."""
+        from kb.search import _rank_bonus
+
+        assert _rank_bonus(0) == 0.05
+        assert _rank_bonus(1) == 0.02
+        assert _rank_bonus(2) == 0.02
+        assert _rank_bonus(3) == 0.0
+        assert _rank_bonus(0) > _rank_bonus(1) > _rank_bonus(3)
 
 
 class TestFillFtsOnlyResults:

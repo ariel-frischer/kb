@@ -45,7 +45,7 @@ Path resolution: `Config.doc_path_for_db()` computes stored paths — relative t
 - `ingest.py` — indexing pipeline: discover files → `.kbignore` filtering → size guard → `extract_text()` → frontmatter tag parsing (markdown) → content-hash diff → chunk → diff chunks by hash → batch embed new → store
 - `db.py` — schema creation + `SCHEMA_VERSION` migration. Tables: `documents` (with `tags` column), `chunks`, `vec_chunks` (vec0 virtual table), `fts_chunks` (FTS5 with trigger-based sync from chunks). v4→v5 rebuilds FTS with triggers; v3→v4 uses ALTER TABLE; older versions drop-and-recreate.
 - `chunk.py` — markdown (heading-aware with ancestry tracking) + plain text chunking. Uses chonkie with overlap refinery when available, regex fallback otherwise. `embedding_text()` enriches chunks with file path + heading ancestry before embedding.
-- `search.py` — hybrid search: vector (vec0 MATCH) + FTS5, fused with score-weighted RRF (vec scaled by similarity, FTS by normalized BM25). `fill_fts_only_results()` backfills metadata for FTS-only hits.
+- `search.py` — hybrid search: vector (vec0 MATCH) + FTS5, fused with score-weighted RRF (vec scaled by similarity, FTS by normalized BM25) with positional rank bonuses. `fill_fts_only_results()` backfills metadata for FTS-only hits.
 - `rerank.py` — RankGPT pattern: presents numbered passages to LLM, parses comma-separated ranking response
 - `filters.py` — inline filter syntax (`file:`, `type:`, `tag:`, `dt>`, `dt<`, `+"kw"`, `-"kw"`) parsed from query string, applied post-search
 - `embed.py` — thin OpenAI embedding wrapper, `serialize_f32()` / `deserialize_f32()` for sqlite-vec binary format
@@ -54,9 +54,11 @@ Path resolution: `Config.doc_path_for_db()` computes stored paths — relative t
 
 **Index**: files → extract_text → content-hash check (skip unchanged) → chunk → diff chunks by hash (reuse unchanged) → batch embed new → store in vec0 (FTS5 synced via triggers)
 
-**Search**: query → parse_filters → embed → vec0 MATCH + FTS5 MATCH → RRF fusion → apply_filters → display
+**Search**: query → parse_filters → embed → vec0 MATCH + FTS5 MATCH → RRF fusion (with rank bonuses) → apply_filters → display
 
-**Ask**: same as search but over-fetches (rerank_fetch_k=20) → LLM rerank → top rerank_top_k → confidence threshold → LLM generates answer
+**FTS**: query → parse_filters → FTS5 MATCH → normalized BM25 scores → apply_filters → display (no embedding, instant)
+
+**Ask**: same as search but over-fetches (rerank_fetch_k=20) → LLM rerank → top rerank_top_k → confidence threshold → LLM generates answer. BM25 shortcut: if FTS top hit norm >= 0.85 with gap >= 0.15, skips embedding/vector/rerank entirely.
 
 **Similar**: resolve file → read chunk embeddings from vec0 → average into doc vector → KNN query → filter out source doc → aggregate best distance per doc → display
 

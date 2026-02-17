@@ -131,21 +131,41 @@ def get_tag_chunk_count(filters: dict, conn: sqlite3.Connection) -> int:
 
     Returns 0 if no tag filters are active.
     """
+    return len(get_tagged_chunk_ids(filters, conn))
+
+
+def get_tagged_chunk_ids(filters: dict, conn: sqlite3.Connection) -> set[int]:
+    """Return set of chunk IDs belonging to documents matching tag filters.
+
+    Returns empty set if no tag filters are active.
+    """
     tags = filters.get("tags", [])
     if not tags:
-        return 0
+        return set()
     rows = conn.execute("SELECT path, tags FROM documents").fetchall()
-    total = 0
+    matching_paths = []
     for r in rows:
         raw = r["tags"] or ""
         doc_tags = {t.strip().lower() for t in raw.split(",") if t.strip()}
         if all(t in doc_tags for t in tags):
-            count = conn.execute(
-                "SELECT COUNT(*) FROM chunks c JOIN documents d ON d.id = c.doc_id WHERE d.path = ?",
-                (r["path"],),
-            ).fetchone()[0]
-            total += count
-    return total
+            matching_paths.append(r["path"])
+    if not matching_paths:
+        return set()
+    chunk_ids: set[int] = set()
+    for path in matching_paths:
+        chunk_rows = conn.execute(
+            "SELECT c.id FROM chunks c JOIN documents d ON d.id = c.doc_id WHERE d.path = ?",
+            (path,),
+        ).fetchall()
+        chunk_ids.update(r[0] for r in chunk_rows)
+    return chunk_ids
+
+
+def remove_tag_filter(filters: dict) -> dict:
+    """Return a copy of filters with tags cleared (for post-filter skip)."""
+    out = dict(filters)
+    out["tags"] = []
+    return out
 
 
 def has_active_filters(filters: dict) -> bool:

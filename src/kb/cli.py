@@ -442,9 +442,13 @@ def cmd_ask(
             "answer": result["answer"],
             "model": result["model"],
             "bm25_shortcut": result["bm25_shortcut"],
+            "rerank": result.get("rerank"),
+            "filters": result.get("filters", {}),
             "timing_ms": result["timing_ms"],
             "tokens": result["tokens"],
             "sources": result["sources"],
+            "result_count": result.get("result_count"),
+            "filtered_count": result.get("filtered_count"),
         }
         if "expansions" in result:
             out["expanded"] = result.get("expanded", False)

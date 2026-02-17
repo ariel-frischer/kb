@@ -38,7 +38,16 @@ def connect(cfg: Config) -> sqlite3.Connection:
     needs_fts_rebuild = False
 
     if current < SCHEMA_VERSION:
-        if current == 7:
+        if current == 8:
+            # Vec0 used L2 distance — switch to cosine. Must drop+recreate vec_chunks.
+            print(
+                f"Schema upgrade v{current} -> v{SCHEMA_VERSION}, switching vec0 to cosine distance..."
+            )
+            conn.execute("DROP TABLE IF EXISTS vec_chunks")
+            print(
+                "  Dropped vec_chunks (L2). Run 'kb index' to reindex with cosine distance."
+            )
+        elif current == 7:
             # Non-destructive: add fts_path to chunks, rebuild FTS using truncated paths
             print(
                 f"Schema upgrade v{current} -> v{SCHEMA_VERSION}, truncating FTS paths..."
@@ -212,7 +221,7 @@ def connect(cfg: Config) -> sqlite3.Connection:
     conn.execute(f"""
         CREATE VIRTUAL TABLE IF NOT EXISTS vec_chunks USING vec0(
             chunk_id INTEGER PRIMARY KEY,
-            embedding float[{cfg.embed_dims}],
+            embedding float[{cfg.embed_dims}] distance_metric=cosine,
             +chunk_text TEXT,
             +doc_path TEXT,
             +heading TEXT

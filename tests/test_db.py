@@ -720,6 +720,106 @@ class TestFtsPath:
 
         conn2.close()
 
+    def test_v8_to_v9_migration_switches_to_cosine(self, tmp_config):
+        """v8 -> v9 drops vec_chunks (L2) and recreates with cosine distance."""
+        import sqlite_vec
+
+        from kb.db import fts_path
+
+        tmp_config.db_path.parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(str(tmp_config.db_path))
+        conn.enable_load_extension(True)
+        sqlite_vec.load(conn)
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)"
+        )
+        conn.execute(
+            "INSERT OR REPLACE INTO meta (key, value) VALUES ('schema_version', '8')"
+        )
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS documents (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                path TEXT UNIQUE NOT NULL,
+                title TEXT,
+                type TEXT,
+                size_bytes INTEGER,
+                content_hash TEXT,
+                indexed_at TEXT DEFAULT (datetime('now')),
+                chunk_count INTEGER DEFAULT 0,
+                tags TEXT DEFAULT ''
+            )
+        """)
+        conn.execute(
+            "INSERT INTO documents (path, title, type, size_bytes, content_hash, chunk_count) "
+            "VALUES ('docs/guide.md', 'Guide', 'markdown', 200, 'def', 1)"
+        )
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS chunks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                doc_id INTEGER NOT NULL,
+                chunk_index INTEGER NOT NULL,
+                text TEXT NOT NULL,
+                heading TEXT,
+                heading_ancestry TEXT,
+                char_count INTEGER,
+                content_hash TEXT,
+                doc_path TEXT DEFAULT '',
+                fts_path TEXT DEFAULT ''
+            )
+        """)
+        conn.execute(
+            "INSERT INTO chunks (doc_id, chunk_index, text, heading, char_count, doc_path, fts_path) "
+            "VALUES (1, 0, 'some content', 'Intro', 12, 'docs/guide.md', ?)",
+            (fts_path("docs/guide.md"),),
+        )
+        # Old vec_chunks without cosine distance
+        conn.execute(f"""
+            CREATE VIRTUAL TABLE IF NOT EXISTS vec_chunks USING vec0(
+                chunk_id INTEGER PRIMARY KEY,
+                embedding float[{tmp_config.embed_dims}],
+                +chunk_text TEXT,
+                +doc_path TEXT,
+                +heading TEXT
+            )
+        """)
+        conn.execute("""
+            CREATE VIRTUAL TABLE IF NOT EXISTS fts_chunks USING fts5(
+                doc_path,
+                heading,
+                text,
+                content='chunks',
+                content_rowid='id',
+                tokenize='porter unicode61'
+            )
+        """)
+        conn.commit()
+        conn.close()
+
+        # Reconnect — should migrate v8->v9
+        conn2 = connect(tmp_config)
+
+        # Data preserved
+        count = conn2.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
+        assert count == 1
+
+        # Schema version updated
+        version = conn2.execute(
+            "SELECT value FROM meta WHERE key = 'schema_version'"
+        ).fetchone()
+        assert int(version[0]) == SCHEMA_VERSION
+
+        # vec_chunks recreated (empty — needs reindex)
+        vec_count = conn2.execute("SELECT COUNT(*) FROM vec_chunks").fetchone()[0]
+        assert vec_count == 0
+
+        # vec_chunks DDL has cosine distance
+        vec_sql = conn2.execute(
+            "SELECT sql FROM sqlite_master WHERE name = 'vec_chunks'"
+        ).fetchone()[0]
+        assert "cosine" in vec_sql.lower()
+
+        conn2.close()
+
 
 class TestReset:
     def test_deletes_existing_db(self, tmp_path, capsys):

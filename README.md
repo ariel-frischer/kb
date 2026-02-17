@@ -150,6 +150,8 @@ sources = [
 # query_expand = false     # generate keyword + semantic query expansions (also --expand flag)
 # expand_method = "local"  # "local" (FLAN-T5) or "llm" (OpenAI API)
 # expand_model = "google/flan-t5-small"  # model for local expand method
+# bm25_shortcut_min = 0.85 # min normalized BM25 for ask shortcut
+# bm25_shortcut_gap = 0.05 # min gap vs second doc for ask shortcut
 # index_code = false       # set true to also index source code files
 ```
 
@@ -268,10 +270,10 @@ kb search "query"
   1. Parse filters, strip from query
   2. HyDE best-of-two: embed both raw query + hypothetical passage, keep better vec results
   3. [Expand]: generate keyword synonyms + semantic rephrasings (if --expand)
-  4. Vector search (vec0 MATCH) + FTS5 keyword search (original + expansion queries)
-  5. Fuse with multi-list weighted RRF (primary 2x, expansions 1x)
-  6. Apply filters (tag over-fetch ensures tagged docs aren't missed)
-  7. Display results
+  4. Vector search (vec0 cosine MATCH) + FTS5 keyword search (original + expansion queries)
+  5. Pre-filter by tagged chunk IDs if tag: filter active
+  6. Fuse with multi-list weighted RRF (primary 2x, expansions 1x)
+  7. Apply remaining filters, display results
 
 kb fts "query"
   1. Parse filters, strip from query
@@ -285,7 +287,7 @@ kb ask "question"
   2. HyDE best-of-two: embed both raw query + hypothetical passage, keep better vec results
   3. [Expand]: generate keyword synonyms + semantic rephrasings (if --expand)
   4. Same as search (with expansion), but over-fetch 20
-  5. Apply filters
+  5. Pre-filter by tagged chunk IDs, then apply remaining filters
   6. Rerank -> top 5 (cross-encoder or LLM)
   7. Confidence threshold
   8. LLM generates answer from context

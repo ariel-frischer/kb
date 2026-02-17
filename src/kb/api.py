@@ -13,14 +13,17 @@ from .embed import deserialize_f32, embed_batch, serialize_f32
 from .expand import expand_query
 from .filters import (
     apply_filters,
-    get_tag_chunk_count,
+    get_tagged_chunk_ids,
     has_active_filters,
     parse_filters,
+    remove_tag_filter,
 )
 from .hyde import generate_hyde_passage
 from .rerank import rerank
 from .search import (
     fill_fts_only_results,
+    filter_fts_by_ids,
+    filter_vec_by_ids,
     fts_escape,
     multi_rrf_fuse,
     normalize_fts_list,
@@ -161,10 +164,11 @@ def search_core(
     has_threshold = cfg.search_threshold > 0
     retrieve_k = (top_k * 5) if has_filters else (top_k * 3)
 
-    # Over-fetch when tag filter is active to cover all tagged doc chunks
+    # Pre-compute tagged chunk IDs for pre-retrieval filtering
+    tagged_chunk_ids: set[int] | None = None
     if filters.get("tags"):
-        tagged_chunks = get_tag_chunk_count(filters, conn)
-        retrieve_k = max(retrieve_k, tagged_chunks + top_k * 3)
+        tagged_chunk_ids = get_tagged_chunk_ids(filters, conn)
+        retrieve_k = max(retrieve_k, len(tagged_chunk_ids) + top_k)
 
     if cfg.query_expand:
         expansions, expand_ms = expand_query(client, clean_query, cfg)
@@ -195,6 +199,13 @@ def search_core(
         primary_fts = run_fts_query(conn, clean_query, retrieve_k)
         exp_fts = [run_fts_query(conn, e["text"], retrieve_k) for e in lex_exps]
         fts_ms = (time.time() - t0) * 1000
+
+        # Pre-filter by tag before fusion
+        if tagged_chunk_ids is not None:
+            primary_vec = filter_vec_by_ids(primary_vec, tagged_chunk_ids)
+            primary_fts = filter_fts_by_ids(primary_fts, tagged_chunk_ids)
+            exp_vec = [filter_vec_by_ids(r, tagged_chunk_ids) for r in exp_vec]
+            exp_fts = [filter_fts_by_ids(r, tagged_chunk_ids) for r in exp_fts]
 
         # Normalize and fuse all lists
         all_lists = [
@@ -233,6 +244,11 @@ def search_core(
                 pass
         fts_ms = (time.time() - t0) * 1000
 
+        # Pre-filter by tag before fusion
+        if tagged_chunk_ids is not None:
+            vec_results = filter_vec_by_ids(vec_results, tagged_chunk_ids)
+            fts_results = filter_fts_by_ids(fts_results, tagged_chunk_ids)
+
         fuse_k = retrieve_k if has_filters else top_k
         results = rrf_fuse(vec_results, fts_results, fuse_k, cfg)
         fill_fts_only_results(conn, results)
@@ -241,8 +257,12 @@ def search_core(
         vec_count = len(vec_results)
         fts_count = len(fts_results)
 
-    if has_filters:
-        results = apply_filters(results, filters, conn)
+    # Skip tag in post-filters since it was handled pre-fusion
+    post_filters = (
+        remove_tag_filter(filters) if tagged_chunk_ids is not None else filters
+    )
+    if has_active_filters(post_filters):
+        results = apply_filters(results, post_filters, conn)
 
     results = results[:top_k]
 
@@ -408,7 +428,10 @@ def ask_core(
                 doc_norms = sorted(best_per_doc.values(), reverse=True)
                 top_norm = doc_norms[0]
                 second_norm = doc_norms[1] if len(doc_norms) > 1 else 0.0
-                if top_norm >= 0.85 and (top_norm - second_norm) >= 0.15:
+                if (
+                    top_norm >= cfg.bm25_shortcut_min
+                    and (top_norm - second_norm) >= cfg.bm25_shortcut_gap
+                ):
                     bm25_shortcut = True
         except sqlite3.OperationalError:
             pass
@@ -454,10 +477,11 @@ def ask_core(
 
         retrieve_k = max(cfg.rerank_fetch_k, top_k * 3)
 
-        # Over-fetch when tag filter is active
+        # Pre-compute tagged chunk IDs for pre-retrieval filtering
+        tagged_chunk_ids_ask: set[int] | None = None
         if filters.get("tags"):
-            tagged_chunks = get_tag_chunk_count(filters, conn)
-            retrieve_k = max(retrieve_k, tagged_chunks + top_k * 3)
+            tagged_chunk_ids_ask = get_tagged_chunk_ids(filters, conn)
+            retrieve_k = max(retrieve_k, len(tagged_chunk_ids_ask) + top_k)
 
         if cfg.query_expand:
             expansions, expand_ms = expand_query(client, clean_question, cfg)
@@ -483,6 +507,13 @@ def ask_core(
             primary_fts = run_fts_query(conn, clean_question, retrieve_k)
             exp_fts = [run_fts_query(conn, e["text"], retrieve_k) for e in lex_exps]
             search_ms = (time.time() - t0) * 1000 - embed_ms
+
+            # Pre-filter by tag before fusion
+            if tagged_chunk_ids_ask is not None:
+                primary_vec = filter_vec_by_ids(primary_vec, tagged_chunk_ids_ask)
+                primary_fts = filter_fts_by_ids(primary_fts, tagged_chunk_ids_ask)
+                exp_vec = [filter_vec_by_ids(r, tagged_chunk_ids_ask) for r in exp_vec]
+                exp_fts = [filter_fts_by_ids(r, tagged_chunk_ids_ask) for r in exp_fts]
 
             all_lists = [
                 normalize_vec_list(primary_vec),
@@ -513,12 +544,23 @@ def ask_core(
                     pass
             search_ms = (time.time() - t0) * 1000 - embed_ms
 
+            # Pre-filter by tag before fusion
+            if tagged_chunk_ids_ask is not None:
+                vec_results = filter_vec_by_ids(vec_results, tagged_chunk_ids_ask)
+                fts_results_ask = filter_fts_by_ids(
+                    fts_results_ask, tagged_chunk_ids_ask
+                )
+
             results = rrf_fuse(vec_results, fts_results_ask, cfg.rerank_fetch_k, cfg)
             fill_fts_only_results(conn, results)
             fused_count = len(results)
 
-        if has_filters:
-            results = apply_filters(results, filters, conn)
+        # Skip tag in post-filters since it was handled pre-fusion
+        post_filters_ask = (
+            remove_tag_filter(filters) if tagged_chunk_ids_ask is not None else filters
+        )
+        if has_active_filters(post_filters_ask):
+            results = apply_filters(results, post_filters_ask, conn)
 
         if len(results) > cfg.rerank_top_k:
             results, rerank_info = rerank(client, clean_question, results, cfg)

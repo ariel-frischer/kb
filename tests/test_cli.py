@@ -1,5 +1,6 @@
 """Tests for kb.cli — command dispatch and CLI commands."""
 
+import json
 from pathlib import Path
 from unittest.mock import patch
 
@@ -11,6 +12,7 @@ from kb.cli import (
     _format_md_table,
     _parse_output_format,
     cmd_add,
+    cmd_ask,
     cmd_init,
     cmd_remove,
     cmd_sources,
@@ -288,7 +290,7 @@ class TestParseOutputFormat:
 
 class TestFormatCsv:
     def _lines(self, text):
-        return [l.strip() for l in text.strip().splitlines()]
+        return [line.strip() for line in text.strip().splitlines()]
 
     def test_basic(self):
         rows = [{"a": 1, "b": "hello"}, {"a": 2, "b": "world"}]
@@ -338,6 +340,62 @@ class TestFormatMdTable:
         result = _format_md_table([], ["a", "b"])
         lines = result.split("\n")
         assert len(lines) == 2  # header + separator only
+
+
+class TestCmdAskJson:
+    def test_json_includes_all_keys(self, tmp_config, capsys):
+        """cmd_ask --json should include rerank, filters, result_count, filtered_count."""
+        mock_result = {
+            "question": "test question",
+            "answer": "test answer",
+            "model": "gpt-4o-mini",
+            "bm25_shortcut": False,
+            "rerank": {
+                "rerank_ms": 100,
+                "prompt_tokens": 50,
+                "completion_tokens": 10,
+                "input_count": 5,
+                "output_count": 3,
+            },
+            "filters": {"tags": ["python"]},
+            "timing_ms": {"hyde": 0, "embed": 10, "search": 20, "generate": 30},
+            "tokens": {"prompt": 100, "completion": 50},
+            "sources": [{"rank": 1, "doc_path": "a.md", "heading": "H"}],
+            "result_count": 10,
+            "filtered_count": 3,
+        }
+        with patch("kb.cli.ask_core", return_value=mock_result):
+            cmd_ask("test question", tmp_config, output_format="json")
+
+        output = json.loads(capsys.readouterr().out)
+        assert output["rerank"] == mock_result["rerank"]
+        assert output["filters"] == {"tags": ["python"]}
+        assert output["result_count"] == 10
+        assert output["filtered_count"] == 3
+
+    def test_json_includes_expansions(self, tmp_config, capsys):
+        """cmd_ask --json should include expansions when present."""
+        mock_result = {
+            "question": "test question",
+            "answer": "test answer",
+            "model": "gpt-4o-mini",
+            "bm25_shortcut": False,
+            "rerank": None,
+            "filters": {},
+            "timing_ms": {"hyde": 0, "embed": 10, "search": 20, "generate": 30},
+            "tokens": {"prompt": 100, "completion": 50},
+            "sources": [],
+            "result_count": 5,
+            "filtered_count": 2,
+            "expanded": True,
+            "expansions": [{"type": "lex", "text": "synonym"}],
+        }
+        with patch("kb.cli.ask_core", return_value=mock_result):
+            cmd_ask("test question", tmp_config, output_format="json")
+
+        output = json.loads(capsys.readouterr().out)
+        assert output["expanded"] is True
+        assert output["expansions"] == [{"type": "lex", "text": "synonym"}]
 
 
 class TestMainDispatch:

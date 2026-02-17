@@ -205,6 +205,16 @@ def multi_rrf_fuse(
     return results
 
 
+def filter_vec_by_ids(vec_results: list[tuple], allowed_ids: set[int]) -> list[tuple]:
+    """Filter vec result tuples to only include chunk IDs in allowed_ids."""
+    return [r for r in vec_results if r[0] in allowed_ids]
+
+
+def filter_fts_by_ids(fts_results: list[tuple], allowed_ids: set[int]) -> list[tuple]:
+    """Filter FTS result tuples to only include chunk IDs in allowed_ids."""
+    return [r for r in fts_results if r[0] in allowed_ids]
+
+
 def fill_fts_only_results(conn: sqlite3.Connection, results: list[dict]):
     """Backfill text/metadata for results that came only from FTS."""
     for r in results:

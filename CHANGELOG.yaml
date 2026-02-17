@@ -2,6 +2,8 @@ releases:
   - version: "unreleased"
     date: null
     added:
+      - description: "Configurable BM25 shortcut thresholds (`bm25_shortcut_min`, `bm25_shortcut_gap`) for ask mode"
+        commits: []
       - description: "Query expansion — generates keyword synonyms (FTS) and semantic rephrasings (vector) via local FLAN-T5 or LLM, fuses with multi-list weighted RRF (`--expand` / `--no-expand`)"
         commits: ["e04c35f", "a00068b"]
       - description: "HyDE (Hypothetical Document Embeddings) — generates a hypothetical answer passage before vector search for improved retrieval on question-style queries"
@@ -22,18 +24,24 @@ releases:
         commits: ["62e9c21"]
       - description: "HyDE best-of-two — embeds both raw query and HyDE passage, keeps whichever vec result set has better top-1 similarity (HyDE can only help, never hurt)"
         commits: ["62e9c21"]
-      - description: "Tag filter over-fetch — retrieval window expanded when tag: filter active to cover all tagged doc chunks"
+      - description: "Tag pre-retrieval filtering — computes tagged chunk IDs and filters vec+FTS before RRF fusion instead of post-filter over-fetch"
         commits: ["62e9c21"]
       - description: "MCP server exposing search/ask/fts/similar/status/list tools for AI agents"
         commits: ["5b145f1", "5d35d92"]
       - description: "Core API module (`api.py`) separating logic from CLI presentation"
         commits: ["5b145f1"]
     fixed:
+      - description: "Vec0 now uses cosine distance — previously L2 distance caused `1 - distance` to produce negative similarity, breaking vector search entirely (schema v8→v9, requires reindex)"
+        commits: []
+      - description: "`kb ask --json` now includes `rerank`, `filters`, `result_count`, `filtered_count` keys (were present in api.py but omitted by cli.py)"
+        commits: []
+      - description: "Tag filter now uses pre-retrieval filtering — computes tagged chunk IDs and filters vec+FTS results before RRF fusion, so tagged docs are found even when they don't rank globally"
+        commits: []
+      - description: "BM25 shortcut gap threshold lowered from 0.15 to 0.05 — shortcut now fires in practice (configurable via `bm25_shortcut_gap`)"
+        commits: []
       - description: "HyDE no longer hurts vec search — best-of-two approach keeps raw query results when HyDE passage is off-domain"
         commits: ["62e9c21"]
       - description: "BM25 shortcut in ask now deduplicates by document before gap check (LIMIT 20, group by doc_path) — shortcut can actually fire"
-        commits: ["62e9c21"]
-      - description: "Tag filter no longer misses documents outside fixed top-k retrieval window — over-fetches to cover all tagged doc chunks"
         commits: ["62e9c21"]
       - description: "Fused candidate count now captured pre-filter; `after_filters` key added when filters active"
         commits: ["62e9c21"]
@@ -52,7 +60,7 @@ releases:
         commits: []
       - description: "`kb reset` now cleans up WAL sidecar files (`.db-shm`, `.db-wal`)"
         commits: []
-      - description: "Schema version upgraded from 4 to 8 (FTS triggers + porter tokenizer + field weighting + fts_path truncation)"
+      - description: "Schema version upgraded from 4 to 9 (FTS triggers + porter tokenizer + field weighting + fts_path truncation + cosine distance)"
         commits: ["cce0a74", "5b145f1", "62e9c21"]
       - description: "CLI refactored to thin wrappers over `api.py` core functions"
         commits: ["5b145f1"]
@@ -61,7 +69,7 @@ releases:
     removed: []
     deprecated: []
     breaking: []
-    migration: "Schema auto-migrates from v4→v5→v6→v7→v8. v7→v8 adds fts_path column (last 2 path components) and rebuilds FTS using truncated paths. v6→v7 adds doc_path column to chunks and rebuilds FTS with 3-column weighted BM25. No reindex needed."
+    migration: "Schema auto-migrates from v4→v5→v6→v7→v8→v9. v8→v9 switches vec0 to cosine distance (drops vec_chunks, reindex required via `kb index`). v7→v8 adds fts_path column (last 2 path components) and rebuilds FTS using truncated paths. v6→v7 adds doc_path column to chunks and rebuilds FTS with 3-column weighted BM25."
     contributors: ["ariel-frischer"]
 
   - version: "1.0.8"

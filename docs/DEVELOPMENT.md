@@ -51,15 +51,15 @@ src/kb/
 
 **Indexing** (`kb index`): find files by extension → extract text (format-specific) → chunking → content-hash diff → embed new chunks → store in sqlite-vec (vec0) + FTS5
 
-**Search** (`kb search`): query → parse filters → [HyDE best-of-two: embed raw query + passage, keep better vec results] → [expand] → vector search + FTS5 (original + expansion queries) → multi-list weighted RRF (primary 2x, expansions 1x) → tag over-fetch if active → apply filters → results
+**Search** (`kb search`): query → parse filters → [HyDE best-of-two: embed raw query + passage, keep better vec results] → [expand] → vector search (vec0 cosine) + FTS5 (original + expansion queries) → pre-filter by tagged chunk IDs if `tag:` active → multi-list weighted RRF (primary 2x, expansions 1x) → apply remaining filters → results
 
-**Ask** (`kb ask`): BM25 probe (LIMIT 20, dedup by document) → if shortcut: FTS only; else: [HyDE best-of-two] → [expand] → vec+fts (multi-query) → multi-list weighted RRF → tag over-fetch → rerank (cross-encoder or LLM) → confidence threshold → LLM generates answer from context
+**Ask** (`kb ask`): BM25 probe (LIMIT 20, dedup by document, shortcut if top norm >= `bm25_shortcut_min` with gap >= `bm25_shortcut_gap`) → if shortcut: FTS only; else: [HyDE best-of-two] → [expand] → vec+fts (multi-query) → pre-filter by tagged chunk IDs → multi-list weighted RRF → apply remaining filters → rerank (cross-encoder or LLM) → confidence threshold → LLM generates answer from context
 
 **Similar** (`kb similar`): read chunk embeddings from vec0 → average into doc vector → KNN query → filter self → aggregate by doc → rank by similarity
 
 ### Key design decisions
 
-- **sqlite-vec `vec0` virtual table** — stores embeddings + text in auxiliary columns, avoiding JOINs at search time
+- **sqlite-vec `vec0` with cosine distance** — stores embeddings + text in auxiliary columns, avoiding JOINs at search time. Uses `distance_metric=cosine` so `1 - distance` gives true cosine similarity
 - **Reciprocal Rank Fusion** — combines vector and keyword rankings without needing score normalization
 - **FTS5 field weighting** — `fts_path` (10x), `heading` (2x), `text` (1x) via BM25 rank config. `fts_path` stores last 2 path components to avoid IDF collapse from common prefixes; filepath matches strongly boost relevance
 - **HyDE best-of-two** — embeds both raw query and hypothetical passage in one batch, runs two vec queries, keeps whichever has better top-1 similarity. HyDE can only help, never hurt. Two methods: `"llm"` (OpenAI API) or `"local"` (causal LM via transformers, default Qwen/Qwen3-0.6B, no API cost). FTS still uses original query.

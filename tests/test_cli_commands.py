@@ -193,7 +193,12 @@ class TestCmdSearch:
         cfg.db_path = tmp_path / "kb.db"
 
         conn = connect(cfg)
-        # Insert two docs with known embeddings
+        # Insert two docs with embeddings pointing away from query direction
+        # Under cosine distance, orthogonal vectors have low similarity
+        embeddings = [
+            [0.0, 1.0, 0.0, 0.0],  # orthogonal to query
+            [0.0, 0.0, 1.0, 0.0],  # orthogonal to query
+        ]
         for i, (text, path) in enumerate(
             [("relevant text about topic", "a.md"), ("unrelated filler", "b.md")]
         ):
@@ -209,19 +214,20 @@ class TestCmdSearch:
                 (doc_id, text, len(text)),
             )
             chunk_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
-            emb = [0.1 * (i + 1)] * 4
             conn.execute(
                 "INSERT INTO vec_chunks (chunk_id, embedding, chunk_text, doc_path, heading) "
                 "VALUES (?, ?, ?, ?, ?)",
-                (chunk_id, serialize_f32(emb), text, path, "H"),
+                (chunk_id, serialize_f32(embeddings[i]), text, path, "H"),
             )
         conn.execute("INSERT INTO fts_chunks(fts_chunks) VALUES('rebuild')")
         conn.commit()
         conn.close()
 
-        # Query returns results but all have low similarity -> threshold filters them out
+        # Query embedding points in a different direction -> low cosine similarity
         client = _mock_openai_client(embed_dims=4)
-        client.embeddings.create.return_value.data = [MagicMock(embedding=[0.9] * 4)]
+        client.embeddings.create.return_value.data = [
+            MagicMock(embedding=[1.0, 0.0, 0.0, 0.0])
+        ]
 
         with patch("kb.api.OpenAI", return_value=client):
             cmd_search("topic", cfg, top_k=5, threshold=0.99)
@@ -305,7 +311,7 @@ class TestCmdAsk:
 
     def test_ask_no_results_above_threshold(self, tmp_path, capsys):
         """When all results have similarity below threshold, show 'no relevant documents'."""
-        # Build a DB where vec results have high distance (low similarity)
+        # Build a DB where vec results have low cosine similarity to query
         cfg = Config(embed_dims=4, ask_threshold=0.99)
         cfg.scope = "project"
         cfg.config_dir = tmp_path
@@ -324,8 +330,8 @@ class TestCmdAsk:
             (doc_id,),
         )
         chunk_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
-        # High distance = low similarity (0.05)
-        emb = [0.9] * 4
+        # Stored embedding orthogonal to query -> low cosine similarity
+        emb = [0.0, 1.0, 0.0, 0.0]
         conn.execute(
             "INSERT INTO vec_chunks (chunk_id, embedding, chunk_text, doc_path, heading) "
             "VALUES (?, ?, ?, ?, ?)",
@@ -335,9 +341,11 @@ class TestCmdAsk:
         conn.commit()
         conn.close()
 
-        # Mock embeddings to return vector far from the stored one
+        # Query embedding orthogonal to stored -> low cosine similarity
         client = _mock_openai_client(embed_dims=4)
-        client.embeddings.create.return_value.data = [MagicMock(embedding=[0.1] * 4)]
+        client.embeddings.create.return_value.data = [
+            MagicMock(embedding=[1.0, 0.0, 0.0, 0.0])
+        ]
 
         with patch("kb.api.OpenAI", return_value=client):
             cmd_ask("question", cfg, top_k=5)

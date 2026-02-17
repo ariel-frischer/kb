@@ -70,10 +70,16 @@ def parse_entry(block: str) -> dict:
         if cat_match:
             # Collect description lines until next category or end
             rest = block[cat_match.end() :]
-            for desc_match in re.finditer(r'^\s+- description:\s*"(.+?)"$', rest, re.MULTILINE):
+            for desc_match in re.finditer(
+                r'^\s+- description:\s*"(.+?)"$', rest, re.MULTILINE
+            ):
                 # Stop if we've hit the next top-level key
                 preceding = rest[: desc_match.start()]
-                if re.search(r"^\s+\w+:", preceding.split("\n")[-1] if preceding else "", re.MULTILINE):
+                if re.search(
+                    r"^\s+\w+:",
+                    preceding.split("\n")[-1] if preceding else "",
+                    re.MULTILINE,
+                ):
                     # Check if it's a sub-key (commits:) or a new category
                     pass
                 items.append(desc_match.group(1))
@@ -82,7 +88,12 @@ def parse_entry(block: str) -> dict:
             for line in rest.splitlines():
                 # If line is a new top-level category, stop
                 stripped = line.strip()
-                if stripped and not stripped.startswith("-") and not stripped.startswith("commits:") and ":" in stripped:
+                if (
+                    stripped
+                    and not stripped.startswith("-")
+                    and not stripped.startswith("commits:")
+                    and ":" in stripped
+                ):
                     key = stripped.split(":")[0]
                     if key in CATEGORY_TITLES or key in ("migration", "contributors"):
                         break

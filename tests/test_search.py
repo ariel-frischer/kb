@@ -5,6 +5,8 @@ import pytest
 from kb.config import Config
 from kb.search import (
     fill_fts_only_results,
+    filter_fts_by_ids,
+    filter_vec_by_ids,
     fts_escape,
     multi_rrf_fuse,
     normalize_fts_list,
@@ -128,6 +130,34 @@ class TestRrfFuse:
         assert _rank_bonus(2) == 0.02
         assert _rank_bonus(3) == 0.0
         assert _rank_bonus(0) > _rank_bonus(1) > _rank_bonus(3)
+
+
+class TestFilterByIds:
+    def test_filter_vec_by_ids(self):
+        vec = [
+            (1, 0.2, "text a", "a.md", "H1"),
+            (2, 0.5, "text b", "b.md", "H2"),
+            (3, 0.8, "text c", "c.md", "H3"),
+        ]
+        result = filter_vec_by_ids(vec, {1, 3})
+        assert len(result) == 2
+        assert result[0][0] == 1
+        assert result[1][0] == 3
+
+    def test_filter_vec_empty_ids(self):
+        vec = [(1, 0.2, "text", "a.md", "H")]
+        assert filter_vec_by_ids(vec, set()) == []
+
+    def test_filter_fts_by_ids(self):
+        fts = [(10, -1.5), (20, -2.0), (30, -3.0)]
+        result = filter_fts_by_ids(fts, {10, 30})
+        assert len(result) == 2
+        assert result[0][0] == 10
+        assert result[1][0] == 30
+
+    def test_filter_fts_empty_ids(self):
+        fts = [(10, -1.5)]
+        assert filter_fts_by_ids(fts, set()) == []
 
 
 class TestFillFtsOnlyResults:

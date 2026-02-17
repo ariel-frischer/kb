@@ -8,7 +8,7 @@ from pathlib import Path
 
 PROJECT_CONFIG_FILE = ".kb.toml"
 SECRETS_PATH = Path.home() / ".config" / "kb" / "secrets.toml"
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 GLOBAL_CONFIG_DIR = Path.home() / ".config" / "kb"
 GLOBAL_CONFIG_FILE = GLOBAL_CONFIG_DIR / "config.toml"
@@ -57,6 +57,10 @@ sources = [
 # expand_method = "local"            # "local" (FLAN-T5, no API cost) or "llm" (OpenAI API)
 # expand_model = "google/flan-t5-small"  # model for local expand method
 
+# BM25 shortcut (skip embedding when top FTS result is dominant)
+# bm25_shortcut_min = 0.85          # min normalized BM25 for top doc
+# bm25_shortcut_gap = 0.05          # min gap between top and second doc
+
 # Format options
 # index_code = false                # also index source code files (.py, .js, .ts, etc.)
 
@@ -92,6 +96,10 @@ sources = [
 # query_expand = false               # enable query expansion
 # expand_method = "local"            # "local" (FLAN-T5, no API cost) or "llm" (OpenAI API)
 # expand_model = "google/flan-t5-small"  # model for local expand method
+
+# BM25 shortcut (skip embedding when top FTS result is dominant)
+# bm25_shortcut_min = 0.85          # min normalized BM25 for top doc
+# bm25_shortcut_gap = 0.05          # min gap between top and second doc
 
 # Format options
 # index_code = false                # also index source code files (.py, .js, .ts, etc.)
@@ -132,6 +140,8 @@ class Config:
     query_expand: bool = False  # generate keyword + semantic query expansions
     expand_method: str = "local"  # "local" (FLAN-T5) or "llm" (OpenAI API)
     expand_model: str = "google/flan-t5-small"  # model for local expand method
+    bm25_shortcut_min: float = 0.85  # min top-doc norm for BM25 shortcut
+    bm25_shortcut_gap: float = 0.05  # min gap vs second-doc for BM25 shortcut
 
     scope: str = "project"  # "global" or "project"
 

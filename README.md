@@ -39,15 +39,15 @@ uv tool install --from "git+https://github.com/ariel-frischer/kb.git" kb
 uv tool install --from "git+https://github.com/ariel-frischer/kb.git" "kb[pdf]"       # + PDF
 uv tool install --from "git+https://github.com/ariel-frischer/kb.git" "kb[office]"    # + DOCX, PPTX, XLSX
 uv tool install --from "git+https://github.com/ariel-frischer/kb.git" "kb[rtf]"       # + RTF
-uv tool install --from "git+https://github.com/ariel-frischer/kb.git" "kb[local-embed]" # + local embeddings (arctic-embed, no API cost)
+uv tool install --from "git+https://github.com/ariel-frischer/kb.git" "kb[local-embed]" # + local embeddings (Granite R2, no API cost)
 uv tool install --from "git+https://github.com/ariel-frischer/kb.git" "kb[rerank]"    # + local cross-encoder reranking
 uv tool install --from "git+https://github.com/ariel-frischer/kb.git" "kb[expand]"    # + local query expansion (FLAN-T5)
 uv tool install --from "git+https://github.com/ariel-frischer/kb.git" "kb[local-llm]" # + local HyDE generation (transformers + torch)
 ```
 
-Requires an OpenAI-compatible API for default mode. Set `OPENAI_API_KEY` in your environment (or in `~/.config/kb/secrets.toml`). For fully offline indexing/search, set `embed_method = "local"` in config (see [Configuration](#configuration)).
+**Runs fully local — no API keys required.** Set `embed_method = "local"` in config (see [Configuration](#configuration)) and use local backends for HyDE (`hyde_method = "local"`), reranking (`rerank_method = "cross-encoder"`), and query expansion (`expand_method = "local"`). Only `kb ask` needs an LLM for the final answer — point it at a local model via Ollama or similar.
 
-Works with any provider that speaks the OpenAI API — set `OPENAI_BASE_URL` to point at Ollama, LiteLLM, vLLM, etc.
+For cloud, the defaults work with any OpenAI-compatible API. Set `OPENAI_API_KEY` in your environment (or in `~/.config/kb/secrets.toml`). Recommended cloud models: `text-embedding-3-small` for embeddings, `gpt-4o-mini` for chat/ask. Works with any provider that speaks the OpenAI API — set `OPENAI_BASE_URL` to point at Ollama, LiteLLM, vLLM, etc.
 
 ## Quickstart
 

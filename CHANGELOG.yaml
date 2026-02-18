@@ -4,12 +4,16 @@ releases:
     added:
       - description: "`kb feedback` CLI command and `kb_feedback` MCP tool for agents to submit bug reports, suggestions, and notes (appends to `~/.local/share/kb/feedback.yml`)"
         commits: []
-      - description: "Local embedding backend via `Snowflake/snowflake-arctic-embed-m-v1.5` (sentence-transformers) — set `embed_method = \"local\"` for fully offline indexing and search with no API cost. Supports Matryoshka dimension truncation and GPU acceleration"
+      - description: "Local embedding backend (sentence-transformers) — set `embed_method = \"local\"` for fully offline indexing and search with no API cost. Supports Matryoshka dimension truncation and GPU acceleration"
         commits: []
       - description: "`local-embed` optional extra (`sentence-transformers>=3.0`) for local embeddings"
         commits: []
+      - description: "Auto-detect local model embedding dimensions — `local_embed_dims(cfg)` prevents vec0 dimension mismatch when switching from OpenAI defaults, while preserving Matryoshka truncation"
+        commits: []
     fixed: []
-    changed: []
+    changed:
+      - description: "Default local embed model switched from `Snowflake/snowflake-arctic-embed-m-v1.5` (109M, BERT) to `ibm-granite/granite-embedding-english-r2` (149M, ModernBERT, +4 NDCG@10 points)"
+        commits: []
     removed: []
     deprecated: []
     breaking: []

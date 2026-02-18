@@ -151,7 +151,7 @@ sources = [
 # expand_method = "local"  # "local" (FLAN-T5) or "llm" (OpenAI API)
 # expand_model = "google/flan-t5-small"  # model for local expand method
 # bm25_shortcut_min = 0.85 # min normalized BM25 for ask shortcut
-# bm25_shortcut_gap = 0.05 # min gap vs second doc for ask shortcut
+# bm25_shortcut_gap = 0.02 # min gap vs second doc for ask shortcut
 # index_code = false       # set true to also index source code files
 ```
 

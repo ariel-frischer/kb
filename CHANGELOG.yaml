@@ -24,7 +24,7 @@ releases:
         commits: ["62e9c21"]
       - description: "HyDE best-of-two — embeds both raw query and HyDE passage, keeps whichever vec result set has better top-1 similarity (HyDE can only help, never hurt)"
         commits: ["62e9c21"]
-      - description: "Tag pre-retrieval filtering — computes tagged chunk IDs and filters vec+FTS before RRF fusion instead of post-filter over-fetch"
+      - description: "Tag SQL-level pre-retrieval filtering — `run_fts_query_filtered()` uses `AND rowid IN (ids)`, `run_vec_query_filtered()` uses `vec_distance_cosine()`, ensuring tagged docs are found regardless of global ranking"
         commits: ["62e9c21"]
       - description: "MCP server exposing search/ask/fts/similar/status/list tools for AI agents"
         commits: ["5b145f1", "5d35d92"]
@@ -35,9 +35,9 @@ releases:
         commits: []
       - description: "`kb ask --json` now includes `rerank`, `filters`, `result_count`, `filtered_count` keys (were present in api.py but omitted by cli.py)"
         commits: []
-      - description: "Tag filter now uses pre-retrieval filtering — computes tagged chunk IDs and filters vec+FTS results before RRF fusion, so tagged docs are found even when they don't rank globally"
+      - description: "Tag filter now uses SQL-level pre-filtering — `run_fts_query_filtered()` adds `AND rowid IN (tagged_ids)` to FTS WHERE clause, `run_vec_query_filtered()` uses `vec_distance_cosine()` for tagged chunks only. Previously filtered Python result lists after SQL returned global top-k, which missed tagged docs entirely"
         commits: []
-      - description: "BM25 shortcut gap threshold lowered from 0.15 to 0.05 — shortcut now fires in practice (configurable via `bm25_shortcut_gap`)"
+      - description: "BM25 shortcut gap threshold lowered from 0.15 to 0.02 — matches real-world corpus gaps of ~0.022 (configurable via `bm25_shortcut_gap`)"
         commits: []
       - description: "HyDE no longer hurts vec search — best-of-two approach keeps raw query results when HyDE passage is off-domain"
         commits: ["62e9c21"]

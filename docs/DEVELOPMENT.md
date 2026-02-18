@@ -51,9 +51,9 @@ src/kb/
 
 **Indexing** (`kb index`): find files by extension → extract text (format-specific) → chunking → content-hash diff → embed new chunks → store in sqlite-vec (vec0) + FTS5
 
-**Search** (`kb search`): query → parse filters → [HyDE best-of-two: embed raw query + passage, keep better vec results] → [expand] → vector search (vec0 cosine) + FTS5 (original + expansion queries) → pre-filter by tagged chunk IDs if `tag:` active → multi-list weighted RRF (primary 2x, expansions 1x) → apply remaining filters → results
+**Search** (`kb search`): query → parse filters → [HyDE best-of-two: embed raw query + passage, keep better vec results] → [expand] → vector search (vec0 cosine) + FTS5 (original + expansion queries; SQL-level pre-filtered to tagged chunk IDs if `tag:` active) → multi-list weighted RRF (primary 2x, expansions 1x) → apply remaining filters → results
 
-**Ask** (`kb ask`): BM25 probe (LIMIT 20, dedup by document, shortcut if top norm >= `bm25_shortcut_min` with gap >= `bm25_shortcut_gap`) → if shortcut: FTS only; else: [HyDE best-of-two] → [expand] → vec+fts (multi-query) → pre-filter by tagged chunk IDs → multi-list weighted RRF → apply remaining filters → rerank (cross-encoder or LLM) → confidence threshold → LLM generates answer from context
+**Ask** (`kb ask`): BM25 probe (LIMIT 20, dedup by document, shortcut if top norm >= `bm25_shortcut_min` with gap >= `bm25_shortcut_gap`) → if shortcut: FTS only; else: [HyDE best-of-two] → [expand] → vec+fts (multi-query; SQL-level pre-filtered to tagged chunk IDs if `tag:` active) → multi-list weighted RRF → apply remaining filters → rerank (cross-encoder or LLM) → confidence threshold → LLM generates answer from context
 
 **Similar** (`kb similar`): read chunk embeddings from vec0 → average into doc vector → KNN query → filter self → aggregate by doc → rank by similarity
 

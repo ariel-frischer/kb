@@ -218,10 +218,21 @@ def connect(cfg: Config) -> sqlite3.Connection:
             fts_path TEXT DEFAULT ''
         )
     """)
+    # Auto-detect local model dims to avoid mismatch (e.g. default 1536 vs model's 768).
+    # Only load model when vec_chunks doesn't exist yet (table creation needs correct dims).
+    dims = cfg.embed_dims
+    if cfg.embed_method == "local":
+        vec_exists = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='vec_chunks'"
+        ).fetchone()
+        if not vec_exists:
+            from .embed import local_embed_dims
+
+            dims = local_embed_dims(cfg)
     conn.execute(f"""
         CREATE VIRTUAL TABLE IF NOT EXISTS vec_chunks USING vec0(
             chunk_id INTEGER PRIMARY KEY,
-            embedding float[{cfg.embed_dims}] distance_metric=cosine,
+            embedding float[{dims}] distance_metric=cosine,
             +chunk_text TEXT,
             +doc_path TEXT,
             +heading TEXT

@@ -46,9 +46,7 @@ def _get_embed_model(model_name: str):
                 "Install it with: pip install 'kb[local-embed]' or pip install sentence-transformers"
             )
         device = _get_device()
-        _embed_model_cache[model_name] = SentenceTransformer(
-            model_name, device=device
-        )
+        _embed_model_cache[model_name] = SentenceTransformer(model_name, device=device)
     return _embed_model_cache[model_name]
 
 
@@ -76,6 +74,18 @@ def local_embed_batch(
         result = [emb[: cfg.embed_dims] for emb in result]
 
     return result
+
+
+def local_embed_dims(cfg: Config) -> int:
+    """Return effective embedding dimensions for a local model.
+
+    Auto-detects native model dims. Returns min(cfg.embed_dims, native) to
+    support Matryoshka truncation while preventing dimension mismatches
+    (e.g. default 1536 vs model's 768).
+    """
+    model = _get_embed_model(cfg.local_embed_model)
+    native = model.get_sentence_embedding_dimension()
+    return min(cfg.embed_dims, native)
 
 
 def embed_batch(

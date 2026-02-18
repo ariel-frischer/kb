@@ -37,7 +37,7 @@ src/kb/
 ├── config.py      — .kb.toml loading, Config dataclass, secrets.toml loading
 ├── db.py          — SQLite schema, sqlite-vec connection, migrations
 ├── chunk.py       — Markdown + plain text chunking (chonkie or regex fallback)
-├── embed.py       — Embedding dispatcher: local (SentenceTransformer, arctic-embed) or OpenAI API, with serialize/deserialize for sqlite-vec
+├── embed.py       — Embedding dispatcher: local (SentenceTransformer, Granite R2 default) or OpenAI API, auto-detected dims, with serialize/deserialize for sqlite-vec
 ├── extract.py     — Text extraction registry for 30+ formats (PDF, DOCX, EPUB, HTML, ODT, etc.)
 ├── hyde.py        — HyDE: generates hypothetical answer passage (local model or LLM API) for better vector retrieval
 ├── expand.py      — Query expansion: local (FLAN-T5) or LLM, generates keyword + semantic variants

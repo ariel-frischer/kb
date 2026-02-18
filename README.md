@@ -19,7 +19,7 @@ CLI RAG tool for your docs. Index 30+ document formats (markdown, PDF, DOCX, EPU
 - **Similar documents** — find related docs using stored embeddings (no API call)
 - **30+ formats** — markdown, PDF, DOCX, PPTX, XLSX, EPUB, HTML, ODT, ODS, ODP, RTF, email (.eml), subtitles (.srt/.vtt), and plain text variants (.txt, .rst, .org, .csv, .json, .yaml, .tex, etc.)
 - **Optional code indexing** — set `index_code = true` to also index source code files (.py, .js, .ts, .go, .rs, etc.)
-- **Local or API embeddings** — local via `Snowflake/snowflake-arctic-embed-m-v1.5` (sentence-transformers, no API cost, fully offline) or OpenAI API — config-driven switch
+- **Local or API embeddings** — local via `ibm-granite/granite-embedding-english-r2` (sentence-transformers, no API cost, fully offline, auto-detected dims) or OpenAI API — config-driven switch
 - **Pluggable chunking** — uses [chonkie](https://github.com/bhavnicksm/chonkie) when available, regex fallback otherwise
 - **MCP server** — expose kb as tools for Claude Desktop, Claude Code, and other MCP clients
 
@@ -138,7 +138,7 @@ sources = [
 # embed_method = "openai"  # "openai" (API) or "local" (sentence-transformers, no API cost)
 # embed_model = "text-embedding-3-small"
 # embed_dims = 1536
-# local_embed_model = "Snowflake/snowflake-arctic-embed-m-v1.5"
+# local_embed_model = "ibm-granite/granite-embedding-english-r2"  # or "Snowflake/snowflake-arctic-embed-m-v1.5"
 # chat_model = "gpt-4o-mini"
 # max_chunk_chars = 2000
 # search_threshold = 0.001      # min cosine similarity for `kb search` (also --threshold flag)

@@ -27,8 +27,10 @@ sources = [
 ]
 
 # Embedding
+# embed_method = "openai"             # "openai" (API) or "local" (sentence-transformers, no API cost)
 # embed_model = "text-embedding-3-small"
 # embed_dims = 1536
+# local_embed_model = "ibm-granite/granite-embedding-english-r2"  # or "Snowflake/snowflake-arctic-embed-m-v1.5"
 
 # LLM
 # chat_model = "gpt-4o-mini"
@@ -80,8 +82,10 @@ sources = [
 ]
 
 # Embedding
+# embed_method = "openai"             # "openai" (API) or "local" (sentence-transformers, no API cost)
 # embed_model = "text-embedding-3-small"
 # embed_dims = 1536
+# local_embed_model = "ibm-granite/granite-embedding-english-r2"  # or "Snowflake/snowflake-arctic-embed-m-v1.5"
 
 # LLM
 # chat_model = "gpt-4o-mini"
@@ -118,8 +122,10 @@ CONFIG_TEMPLATE = PROJECT_CONFIG_TEMPLATE
 class Config:
     db: str = ".kb/kb.db"
     sources: list[str] = field(default_factory=list)
+    embed_method: str = "openai"  # "openai" (API) or "local" (sentence-transformers)
     embed_model: str = "text-embedding-3-small"
     embed_dims: int = 1536
+    local_embed_model: str = "ibm-granite/granite-embedding-english-r2"
     chat_model: str = "gpt-4o-mini"
     max_chunk_chars: int = 2000
     min_chunk_chars: int = 50

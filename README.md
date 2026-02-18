@@ -19,6 +19,7 @@ CLI RAG tool for your docs. Index 30+ document formats (markdown, PDF, DOCX, EPU
 - **Similar documents** — find related docs using stored embeddings (no API call)
 - **30+ formats** — markdown, PDF, DOCX, PPTX, XLSX, EPUB, HTML, ODT, ODS, ODP, RTF, email (.eml), subtitles (.srt/.vtt), and plain text variants (.txt, .rst, .org, .csv, .json, .yaml, .tex, etc.)
 - **Optional code indexing** — set `index_code = true` to also index source code files (.py, .js, .ts, .go, .rs, etc.)
+- **Local or API embeddings** — local via `Snowflake/snowflake-arctic-embed-m-v1.5` (sentence-transformers, no API cost, fully offline) or OpenAI API — config-driven switch
 - **Pluggable chunking** — uses [chonkie](https://github.com/bhavnicksm/chonkie) when available, regex fallback otherwise
 - **MCP server** — expose kb as tools for Claude Desktop, Claude Code, and other MCP clients
 
@@ -38,12 +39,13 @@ uv tool install --from "git+https://github.com/ariel-frischer/kb.git" kb
 uv tool install --from "git+https://github.com/ariel-frischer/kb.git" "kb[pdf]"       # + PDF
 uv tool install --from "git+https://github.com/ariel-frischer/kb.git" "kb[office]"    # + DOCX, PPTX, XLSX
 uv tool install --from "git+https://github.com/ariel-frischer/kb.git" "kb[rtf]"       # + RTF
-uv tool install --from "git+https://github.com/ariel-frischer/kb.git" "kb[rerank]"   # + local cross-encoder reranking
+uv tool install --from "git+https://github.com/ariel-frischer/kb.git" "kb[local-embed]" # + local embeddings (arctic-embed, no API cost)
+uv tool install --from "git+https://github.com/ariel-frischer/kb.git" "kb[rerank]"    # + local cross-encoder reranking
 uv tool install --from "git+https://github.com/ariel-frischer/kb.git" "kb[expand]"    # + local query expansion (FLAN-T5)
 uv tool install --from "git+https://github.com/ariel-frischer/kb.git" "kb[local-llm]" # + local HyDE generation (transformers + torch)
 ```
 
-Requires an OpenAI-compatible API. Set `OPENAI_API_KEY` in your environment (or in `~/.config/kb/secrets.toml`).
+Requires an OpenAI-compatible API for default mode. Set `OPENAI_API_KEY` in your environment (or in `~/.config/kb/secrets.toml`). For fully offline indexing/search, set `embed_method = "local"` in config (see [Configuration](#configuration)).
 
 Works with any provider that speaks the OpenAI API — set `OPENAI_BASE_URL` to point at Ollama, LiteLLM, vLLM, etc.
 
@@ -133,8 +135,10 @@ sources = [
 ]
 
 # All optional — defaults shown
+# embed_method = "openai"  # "openai" (API) or "local" (sentence-transformers, no API cost)
 # embed_model = "text-embedding-3-small"
 # embed_dims = 1536
+# local_embed_model = "Snowflake/snowflake-arctic-embed-m-v1.5"
 # chat_model = "gpt-4o-mini"
 # max_chunk_chars = 2000
 # search_threshold = 0.001      # min cosine similarity for `kb search` (also --threshold flag)
@@ -263,7 +267,7 @@ kb index
   3. Content-hash check — skip unchanged files
   4. Chunk (chonkie or regex fallback)
   5. Diff chunks by hash — only embed new/changed
-  6. Batch embed via OpenAI
+  6. Batch embed (local sentence-transformers or OpenAI API)
   7. Store in sqlite-vec (vec0) + FTS5
 
 kb search "query"

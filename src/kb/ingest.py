@@ -201,7 +201,7 @@ def _index_file(
 def index_directory(dir_path: Path, cfg: Config, *, no_size_limit: bool = False):
     """Index all supported document files in a directory."""
     conn = connect(cfg)
-    client = OpenAI()
+    client = OpenAI() if cfg.embed_method != "local" else None
 
     ignore_patterns = _load_ignore_patterns(dir_path)
     exts = supported_extensions(include_code=cfg.index_code)

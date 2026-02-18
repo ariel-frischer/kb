@@ -4,6 +4,10 @@ releases:
     added:
       - description: "`kb feedback` CLI command and `kb_feedback` MCP tool for agents to submit bug reports, suggestions, and notes (appends to `~/.local/share/kb/feedback.yml`)"
         commits: []
+      - description: "Local embedding backend via `Snowflake/snowflake-arctic-embed-m-v1.5` (sentence-transformers) — set `embed_method = \"local\"` for fully offline indexing and search with no API cost. Supports Matryoshka dimension truncation and GPU acceleration"
+        commits: []
+      - description: "`local-embed` optional extra (`sentence-transformers>=3.0`) for local embeddings"
+        commits: []
     fixed: []
     changed: []
     removed: []

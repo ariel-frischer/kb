@@ -37,7 +37,7 @@ src/kb/
 ├── config.py      — .kb.toml loading, Config dataclass, secrets.toml loading
 ├── db.py          — SQLite schema, sqlite-vec connection, migrations
 ├── chunk.py       — Markdown + plain text chunking (chonkie or regex fallback)
-├── embed.py       — OpenAI embedding helpers, batching, serialize/deserialize for sqlite-vec
+├── embed.py       — Embedding dispatcher: local (SentenceTransformer, arctic-embed) or OpenAI API, with serialize/deserialize for sqlite-vec
 ├── extract.py     — Text extraction registry for 30+ formats (PDF, DOCX, EPUB, HTML, ODT, etc.)
 ├── hyde.py        — HyDE: generates hypothetical answer passage (local model or LLM API) for better vector retrieval
 ├── expand.py      — Query expansion: local (FLAN-T5) or LLM, generates keyword + semantic variants
@@ -49,7 +49,7 @@ src/kb/
 
 ### Data flow
 
-**Indexing** (`kb index`): find files by extension → extract text (format-specific) → chunking → content-hash diff → embed new chunks → store in sqlite-vec (vec0) + FTS5
+**Indexing** (`kb index`): find files by extension → extract text (format-specific) → chunking → content-hash diff → embed new chunks (local SentenceTransformer or OpenAI API, based on `embed_method`) → store in sqlite-vec (vec0) + FTS5
 
 **Search** (`kb search`): query → parse filters → [HyDE best-of-two: embed raw query + passage, keep better vec results] → [expand] → vector search (vec0 cosine) + FTS5 (original + expansion queries; SQL-level pre-filtered to tagged chunk IDs if `tag:` active) → multi-list weighted RRF (primary 2x, expansions 1x) → apply remaining filters → results
 

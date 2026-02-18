@@ -120,7 +120,7 @@ def _pick_best_vec(
         texts.append(hyde_passage)
 
     t0 = time.time()
-    embeddings = embed_batch(client, texts, cfg)
+    embeddings = embed_batch(client, texts, cfg, is_query=True)
     embed_ms = (time.time() - t0) * 1000
 
     if tagged_ids is not None:
@@ -204,7 +204,7 @@ def search_core(
 
         # Batch embed vec expansions (separate call)
         if vec_exps:
-            exp_embeddings = embed_batch(client, [e["text"] for e in vec_exps], cfg)
+            exp_embeddings = embed_batch(client, [e["text"] for e in vec_exps], cfg, is_query=True)
             embed_ms += (time.time() - t0) * 1000 - embed_ms
             if tagged_chunk_ids is not None:
                 exp_vec = [
@@ -527,7 +527,7 @@ def ask_core(
 
             # Batch embed vec expansions
             if vec_exps:
-                exp_embeddings = embed_batch(client, [e["text"] for e in vec_exps], cfg)
+                exp_embeddings = embed_batch(client, [e["text"] for e in vec_exps], cfg, is_query=True)
                 if tagged_chunk_ids_ask is not None:
                     exp_vec = [
                         run_vec_query_filtered(

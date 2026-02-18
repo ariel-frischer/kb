@@ -123,14 +123,32 @@ def local_hyde_passage(query: str, cfg: Config) -> tuple[str | None, float]:
         return None, elapsed
 
 
+def _resolve_key(value: str) -> str:
+    """Resolve 'env:VAR_NAME' to the env var value, or return as-is."""
+    if value.startswith("env:"):
+        return os.environ.get(value[4:], "")
+    return value
+
+
+def _hyde_client(client: OpenAI, cfg: Config) -> OpenAI:
+    """Return a dedicated OpenAI client for HyDE if base_url/api_key are configured."""
+    if not cfg.hyde_base_url:
+        return client
+    kwargs: dict = {"base_url": cfg.hyde_base_url}
+    if cfg.hyde_api_key:
+        kwargs["api_key"] = _resolve_key(cfg.hyde_api_key)
+    return OpenAI(**kwargs)
+
+
 def llm_hyde_passage(
     query: str, client: OpenAI, cfg: Config
 ) -> tuple[str | None, float]:
     """Generate a hypothetical passage via OpenAI API."""
     model = cfg.hyde_model or cfg.chat_model
+    hyde_cl = _hyde_client(client, cfg)
     t0 = time.time()
     try:
-        resp = client.chat.completions.create(
+        resp = hyde_cl.chat.completions.create(
             model=model,
             messages=[
                 {"role": "system", "content": _SYSTEM_PROMPT},

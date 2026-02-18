@@ -205,14 +205,51 @@ def multi_rrf_fuse(
     return results
 
 
-def filter_vec_by_ids(vec_results: list[tuple], allowed_ids: set[int]) -> list[tuple]:
-    """Filter vec result tuples to only include chunk IDs in allowed_ids."""
-    return [r for r in vec_results if r[0] in allowed_ids]
+def run_fts_query_filtered(
+    conn: sqlite3.Connection, query_str: str, limit: int, allowed_ids: set[int]
+) -> list[tuple]:
+    """Execute FTS5 search restricted to specific chunk IDs (SQL-level pre-filter).
+
+    Returns list of (chunk_id, fts_rank). Returns [] if no terms or no allowed IDs.
+    """
+    fts_q = fts_escape(query_str)
+    if not fts_q or not allowed_ids:
+        return []
+    ids_csv = ",".join(str(i) for i in sorted(allowed_ids))
+    try:
+        rows = conn.execute(
+            f"SELECT rowid, rank FROM fts_chunks "
+            f"WHERE fts_chunks MATCH ? AND rowid IN ({ids_csv}) "
+            f"ORDER BY rank LIMIT ?",
+            (fts_q, limit),
+        ).fetchall()
+        return [(r["rowid"], r["rank"]) for r in rows]
+    except sqlite3.OperationalError:
+        return []
 
 
-def filter_fts_by_ids(fts_results: list[tuple], allowed_ids: set[int]) -> list[tuple]:
-    """Filter FTS result tuples to only include chunk IDs in allowed_ids."""
-    return [r for r in fts_results if r[0] in allowed_ids]
+def run_vec_query_filtered(
+    conn: sqlite3.Connection, emb_bytes: bytes, allowed_ids: set[int]
+) -> list[tuple]:
+    """Compute cosine distance for specific chunk IDs via vec_distance_cosine().
+
+    SQL-level pre-filter: only computes distance for chunks in allowed_ids.
+    Returns same format as run_vec_query: [(chunk_id, distance, text, doc_path, heading)].
+    """
+    if not allowed_ids:
+        return []
+    ids_csv = ",".join(str(i) for i in sorted(allowed_ids))
+    rows = conn.execute(
+        f"SELECT chunk_id, vec_distance_cosine(embedding, ?) as distance, "
+        f"chunk_text, doc_path, heading "
+        f"FROM vec_chunks WHERE chunk_id IN ({ids_csv}) "
+        f"ORDER BY distance",
+        (emb_bytes,),
+    ).fetchall()
+    return [
+        (r["chunk_id"], r["distance"], r["chunk_text"], r["doc_path"], r["heading"])
+        for r in rows
+    ]
 
 
 def fill_fts_only_results(conn: sqlite3.Connection, results: list[dict]):

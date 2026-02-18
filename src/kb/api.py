@@ -22,15 +22,15 @@ from .hyde import generate_hyde_passage
 from .rerank import rerank
 from .search import (
     fill_fts_only_results,
-    filter_fts_by_ids,
-    filter_vec_by_ids,
     fts_escape,
     multi_rrf_fuse,
     normalize_fts_list,
     normalize_vec_list,
     rrf_fuse,
     run_fts_query,
+    run_fts_query_filtered,
     run_vec_query,
+    run_vec_query_filtered,
 )
 
 
@@ -103,12 +103,16 @@ def _pick_best_vec(
     hyde_passage: str | None,
     retrieve_k: int,
     cfg: Config,
+    tagged_ids: set[int] | None = None,
 ) -> tuple[list[tuple], float]:
     """Embed query (and optionally HyDE passage), run vec queries, return best results + embed_ms.
 
     When hyde_passage is provided, embeds both in a single batch API call,
     runs two vec queries, and returns whichever has better top-1 similarity.
     HyDE can only help, never hurt.
+
+    When tagged_ids is provided, uses SQL-level pre-filtering via
+    vec_distance_cosine() instead of KNN, ensuring tagged chunks are always found.
     """
     texts = [query]
     if hyde_passage:
@@ -118,10 +122,20 @@ def _pick_best_vec(
     embeddings = embed_batch(client, texts, cfg)
     embed_ms = (time.time() - t0) * 1000
 
-    query_vec = run_vec_query(conn, serialize_f32(embeddings[0]), retrieve_k)
+    if tagged_ids is not None:
+        query_vec = run_vec_query_filtered(
+            conn, serialize_f32(embeddings[0]), tagged_ids
+        )
+    else:
+        query_vec = run_vec_query(conn, serialize_f32(embeddings[0]), retrieve_k)
 
     if hyde_passage and len(embeddings) > 1:
-        hyde_vec = run_vec_query(conn, serialize_f32(embeddings[1]), retrieve_k)
+        if tagged_ids is not None:
+            hyde_vec = run_vec_query_filtered(
+                conn, serialize_f32(embeddings[1]), tagged_ids
+            )
+        else:
+            hyde_vec = run_vec_query(conn, serialize_f32(embeddings[1]), retrieve_k)
         # Pick whichever has better top-1 similarity (lower distance = better)
         query_best = query_vec[0][1] if query_vec else float("inf")
         hyde_best = hyde_vec[0][1] if hyde_vec else float("inf")
@@ -178,17 +192,24 @@ def search_core(
         # Best-of-two vec: embed query + HyDE, pick better result set
         t0 = time.time()
         primary_vec, embed_ms = _pick_best_vec(
-            conn, client, clean_query, hyde_passage, retrieve_k, cfg
+            conn, client, clean_query, hyde_passage, retrieve_k, cfg,
+            tagged_ids=tagged_chunk_ids,
         )
 
         # Batch embed vec expansions (separate call)
         if vec_exps:
             exp_embeddings = embed_batch(client, [e["text"] for e in vec_exps], cfg)
             embed_ms += (time.time() - t0) * 1000 - embed_ms
-            exp_vec = [
-                run_vec_query(conn, serialize_f32(emb), retrieve_k)
-                for emb in exp_embeddings
-            ]
+            if tagged_chunk_ids is not None:
+                exp_vec = [
+                    run_vec_query_filtered(conn, serialize_f32(emb), tagged_chunk_ids)
+                    for emb in exp_embeddings
+                ]
+            else:
+                exp_vec = [
+                    run_vec_query(conn, serialize_f32(emb), retrieve_k)
+                    for emb in exp_embeddings
+                ]
         else:
             exp_vec = []
 
@@ -196,16 +217,18 @@ def search_core(
         vec_ms = (time.time() - t0) * 1000
 
         t0 = time.time()
-        primary_fts = run_fts_query(conn, clean_query, retrieve_k)
-        exp_fts = [run_fts_query(conn, e["text"], retrieve_k) for e in lex_exps]
-        fts_ms = (time.time() - t0) * 1000
-
-        # Pre-filter by tag before fusion
         if tagged_chunk_ids is not None:
-            primary_vec = filter_vec_by_ids(primary_vec, tagged_chunk_ids)
-            primary_fts = filter_fts_by_ids(primary_fts, tagged_chunk_ids)
-            exp_vec = [filter_vec_by_ids(r, tagged_chunk_ids) for r in exp_vec]
-            exp_fts = [filter_fts_by_ids(r, tagged_chunk_ids) for r in exp_fts]
+            primary_fts = run_fts_query_filtered(
+                conn, clean_query, retrieve_k, tagged_chunk_ids
+            )
+            exp_fts = [
+                run_fts_query_filtered(conn, e["text"], retrieve_k, tagged_chunk_ids)
+                for e in lex_exps
+            ]
+        else:
+            primary_fts = run_fts_query(conn, clean_query, retrieve_k)
+            exp_fts = [run_fts_query(conn, e["text"], retrieve_k) for e in lex_exps]
+        fts_ms = (time.time() - t0) * 1000
 
         # Normalize and fuse all lists
         all_lists = [
@@ -226,28 +249,19 @@ def search_core(
     else:
         t0 = time.time()
         vec_results, embed_ms = _pick_best_vec(
-            conn, client, clean_query, hyde_passage, retrieve_k, cfg
+            conn, client, clean_query, hyde_passage, retrieve_k, cfg,
+            tagged_ids=tagged_chunk_ids,
         )
         vec_ms = (time.time() - t0) * 1000 - embed_ms
 
         t0 = time.time()
-        fts_q = fts_escape(clean_query)
-        fts_results: list[tuple] = []
-        if fts_q:
-            try:
-                fts_rows = conn.execute(
-                    "SELECT rowid, rank FROM fts_chunks WHERE fts_chunks MATCH ? ORDER BY rank LIMIT ?",
-                    (fts_q, retrieve_k),
-                ).fetchall()
-                fts_results = [(r["rowid"], r["rank"]) for r in fts_rows]
-            except sqlite3.OperationalError:
-                pass
-        fts_ms = (time.time() - t0) * 1000
-
-        # Pre-filter by tag before fusion
         if tagged_chunk_ids is not None:
-            vec_results = filter_vec_by_ids(vec_results, tagged_chunk_ids)
-            fts_results = filter_fts_by_ids(fts_results, tagged_chunk_ids)
+            fts_results = run_fts_query_filtered(
+                conn, clean_query, retrieve_k, tagged_chunk_ids
+            )
+        else:
+            fts_results = run_fts_query(conn, clean_query, retrieve_k)
+        fts_ms = (time.time() - t0) * 1000
 
         fuse_k = retrieve_k if has_filters else top_k
         results = rrf_fuse(vec_results, fts_results, fuse_k, cfg)
@@ -491,29 +505,44 @@ def ask_core(
             # Best-of-two vec: embed query + HyDE, pick better result set
             t0 = time.time()
             primary_vec, embed_ms = _pick_best_vec(
-                conn, client, clean_question, hyde_passage, retrieve_k, cfg
+                conn, client, clean_question, hyde_passage, retrieve_k, cfg,
+                tagged_ids=tagged_chunk_ids_ask,
             )
 
             # Batch embed vec expansions
             if vec_exps:
                 exp_embeddings = embed_batch(client, [e["text"] for e in vec_exps], cfg)
-                exp_vec = [
-                    run_vec_query(conn, serialize_f32(emb), retrieve_k)
-                    for emb in exp_embeddings
-                ]
+                if tagged_chunk_ids_ask is not None:
+                    exp_vec = [
+                        run_vec_query_filtered(
+                            conn, serialize_f32(emb), tagged_chunk_ids_ask
+                        )
+                        for emb in exp_embeddings
+                    ]
+                else:
+                    exp_vec = [
+                        run_vec_query(conn, serialize_f32(emb), retrieve_k)
+                        for emb in exp_embeddings
+                    ]
             else:
                 exp_vec = []
 
-            primary_fts = run_fts_query(conn, clean_question, retrieve_k)
-            exp_fts = [run_fts_query(conn, e["text"], retrieve_k) for e in lex_exps]
-            search_ms = (time.time() - t0) * 1000 - embed_ms
-
-            # Pre-filter by tag before fusion
             if tagged_chunk_ids_ask is not None:
-                primary_vec = filter_vec_by_ids(primary_vec, tagged_chunk_ids_ask)
-                primary_fts = filter_fts_by_ids(primary_fts, tagged_chunk_ids_ask)
-                exp_vec = [filter_vec_by_ids(r, tagged_chunk_ids_ask) for r in exp_vec]
-                exp_fts = [filter_fts_by_ids(r, tagged_chunk_ids_ask) for r in exp_fts]
+                primary_fts = run_fts_query_filtered(
+                    conn, clean_question, retrieve_k, tagged_chunk_ids_ask
+                )
+                exp_fts = [
+                    run_fts_query_filtered(
+                        conn, e["text"], retrieve_k, tagged_chunk_ids_ask
+                    )
+                    for e in lex_exps
+                ]
+            else:
+                primary_fts = run_fts_query(conn, clean_question, retrieve_k)
+                exp_fts = [
+                    run_fts_query(conn, e["text"], retrieve_k) for e in lex_exps
+                ]
+            search_ms = (time.time() - t0) * 1000 - embed_ms
 
             all_lists = [
                 normalize_vec_list(primary_vec),
@@ -529,27 +558,26 @@ def ask_core(
         else:
             t0 = time.time()
             vec_results, embed_ms = _pick_best_vec(
-                conn, client, clean_question, hyde_passage, retrieve_k, cfg
+                conn, client, clean_question, hyde_passage, retrieve_k, cfg,
+                tagged_ids=tagged_chunk_ids_ask,
             )
 
-            fts_results_ask: list[tuple] = []
-            if fts_q:
-                try:
-                    fts_rows = conn.execute(
-                        "SELECT rowid, rank FROM fts_chunks WHERE fts_chunks MATCH ? ORDER BY rank LIMIT ?",
-                        (fts_q, retrieve_k),
-                    ).fetchall()
-                    fts_results_ask = [(r["rowid"], r["rank"]) for r in fts_rows]
-                except sqlite3.OperationalError:
-                    pass
-            search_ms = (time.time() - t0) * 1000 - embed_ms
-
-            # Pre-filter by tag before fusion
             if tagged_chunk_ids_ask is not None:
-                vec_results = filter_vec_by_ids(vec_results, tagged_chunk_ids_ask)
-                fts_results_ask = filter_fts_by_ids(
-                    fts_results_ask, tagged_chunk_ids_ask
+                fts_results_ask = run_fts_query_filtered(
+                    conn, clean_question, retrieve_k, tagged_chunk_ids_ask
                 )
+            else:
+                fts_results_ask: list[tuple] = []
+                if fts_q:
+                    try:
+                        fts_rows = conn.execute(
+                            "SELECT rowid, rank FROM fts_chunks WHERE fts_chunks MATCH ? ORDER BY rank LIMIT ?",
+                            (fts_q, retrieve_k),
+                        ).fetchall()
+                        fts_results_ask = [(r["rowid"], r["rank"]) for r in fts_rows]
+                    except sqlite3.OperationalError:
+                        pass
+            search_ms = (time.time() - t0) * 1000 - embed_ms
 
             results = rrf_fuse(vec_results, fts_results_ask, cfg.rerank_fetch_k, cfg)
             fill_fts_only_results(conn, results)

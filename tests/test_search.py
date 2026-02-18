@@ -1,17 +1,19 @@
-"""Tests for kb.search — FTS escape, RRF fusion, multi-RRF fusion, backfill."""
+"""Tests for kb.search — FTS escape, RRF fusion, multi-RRF fusion, backfill, SQL-level filtering."""
+
+import struct
 
 import pytest
 
 from kb.config import Config
 from kb.search import (
     fill_fts_only_results,
-    filter_fts_by_ids,
-    filter_vec_by_ids,
     fts_escape,
     multi_rrf_fuse,
     normalize_fts_list,
     normalize_vec_list,
     rrf_fuse,
+    run_fts_query_filtered,
+    run_vec_query_filtered,
 )
 
 
@@ -132,32 +134,119 @@ class TestRrfFuse:
         assert _rank_bonus(0) > _rank_bonus(1) > _rank_bonus(3)
 
 
-class TestFilterByIds:
-    def test_filter_vec_by_ids(self):
-        vec = [
-            (1, 0.2, "text a", "a.md", "H1"),
-            (2, 0.5, "text b", "b.md", "H2"),
-            (3, 0.8, "text c", "c.md", "H3"),
+class TestRunFtsQueryFiltered:
+    """Test SQL-level FTS pre-filtering by chunk IDs."""
+
+    def _insert_doc_and_chunks(self, conn, texts):
+        """Insert a doc with chunks; return list of chunk IDs."""
+        conn.execute(
+            "INSERT INTO documents (path, title, type, size_bytes, content_hash) "
+            "VALUES ('test.md', 'Test', 'markdown', 100, 'abc')"
+        )
+        doc_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+        chunk_ids = []
+        for i, text in enumerate(texts):
+            conn.execute(
+                "INSERT INTO chunks (doc_id, doc_path, fts_path, chunk_index, text, heading, char_count) "
+                "VALUES (?, 'test.md', 'test.md', ?, ?, '', ?)",
+                (doc_id, i, text, len(text)),
+            )
+            chunk_ids.append(conn.execute("SELECT last_insert_rowid()").fetchone()[0])
+        conn.commit()
+        return chunk_ids
+
+    def test_returns_only_allowed_ids(self, db_conn):
+        ids = self._insert_doc_and_chunks(
+            db_conn, ["alpha bravo charlie", "alpha delta echo", "foxtrot golf hotel"]
+        )
+        # Only allow first two chunks; query matches all three via "alpha" only in first two
+        result = run_fts_query_filtered(db_conn, "alpha", 10, {ids[0], ids[1]})
+        returned_ids = {r[0] for r in result}
+        assert returned_ids == {ids[0], ids[1]}
+
+    def test_excludes_non_allowed_ids(self, db_conn):
+        ids = self._insert_doc_and_chunks(
+            db_conn, ["alpha bravo", "alpha charlie", "alpha delta"]
+        )
+        # Only allow last chunk
+        result = run_fts_query_filtered(db_conn, "alpha", 10, {ids[2]})
+        assert len(result) == 1
+        assert result[0][0] == ids[2]
+
+    def test_empty_allowed_ids(self, db_conn):
+        self._insert_doc_and_chunks(db_conn, ["alpha bravo"])
+        assert run_fts_query_filtered(db_conn, "alpha", 10, set()) == []
+
+    def test_no_match_in_allowed(self, db_conn):
+        ids = self._insert_doc_and_chunks(db_conn, ["alpha bravo", "charlie delta"])
+        # Allow only chunk that doesn't match query
+        result = run_fts_query_filtered(db_conn, "alpha", 10, {ids[1]})
+        assert result == []
+
+
+class TestRunVecQueryFiltered:
+    """Test SQL-level vec pre-filtering by chunk IDs via vec_distance_cosine."""
+
+    def _insert_vec_chunks(self, conn, embeddings, dims=4):
+        """Insert chunks + vec_chunks; return list of chunk IDs."""
+        conn.execute(
+            "INSERT INTO documents (path, title, type, size_bytes, content_hash) "
+            "VALUES ('test.md', 'Test', 'markdown', 100, 'abc')"
+        )
+        doc_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+        chunk_ids = []
+        for i, emb in enumerate(embeddings):
+            conn.execute(
+                "INSERT INTO chunks (doc_id, doc_path, fts_path, chunk_index, text, heading, char_count) "
+                "VALUES (?, 'test.md', 'test.md', ?, ?, '', 10)",
+                (doc_id, i, f"text_{i}"),
+            )
+            cid = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+            emb_bytes = struct.pack(f"{dims}f", *emb)
+            conn.execute(
+                "INSERT INTO vec_chunks (chunk_id, embedding, chunk_text, doc_path, heading) "
+                "VALUES (?, ?, ?, 'test.md', '')",
+                (cid, emb_bytes, f"text_{i}"),
+            )
+            chunk_ids.append(cid)
+        conn.commit()
+        return chunk_ids
+
+    def test_returns_only_allowed_ids(self, db_conn):
+        embs = [
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.7, 0.7, 0.0, 0.0],
         ]
-        result = filter_vec_by_ids(vec, {1, 3})
-        assert len(result) == 2
-        assert result[0][0] == 1
-        assert result[1][0] == 3
+        ids = self._insert_vec_chunks(db_conn, embs)
+        query_emb = struct.pack("4f", 1.0, 0.0, 0.0, 0.0)
+        # Only allow first and third chunks
+        result = run_vec_query_filtered(db_conn, query_emb, {ids[0], ids[2]})
+        returned_ids = {r[0] for r in result}
+        assert returned_ids == {ids[0], ids[2]}
+        # First chunk (exact match) should have distance ~0
+        assert result[0][0] == ids[0]
+        assert result[0][1] == pytest.approx(0.0, abs=1e-6)
 
-    def test_filter_vec_empty_ids(self):
-        vec = [(1, 0.2, "text", "a.md", "H")]
-        assert filter_vec_by_ids(vec, set()) == []
+    def test_empty_allowed_ids(self, db_conn):
+        embs = [[1.0, 0.0, 0.0, 0.0]]
+        self._insert_vec_chunks(db_conn, embs)
+        query_emb = struct.pack("4f", 1.0, 0.0, 0.0, 0.0)
+        assert run_vec_query_filtered(db_conn, query_emb, set()) == []
 
-    def test_filter_fts_by_ids(self):
-        fts = [(10, -1.5), (20, -2.0), (30, -3.0)]
-        result = filter_fts_by_ids(fts, {10, 30})
-        assert len(result) == 2
-        assert result[0][0] == 10
-        assert result[1][0] == 30
-
-    def test_filter_fts_empty_ids(self):
-        fts = [(10, -1.5)]
-        assert filter_fts_by_ids(fts, set()) == []
+    def test_results_sorted_by_distance(self, db_conn):
+        embs = [
+            [0.0, 1.0, 0.0, 0.0],  # orthogonal to query
+            [1.0, 0.0, 0.0, 0.0],  # exact match
+            [0.7, 0.7, 0.0, 0.0],  # partial match
+        ]
+        ids = self._insert_vec_chunks(db_conn, embs)
+        query_emb = struct.pack("4f", 1.0, 0.0, 0.0, 0.0)
+        result = run_vec_query_filtered(db_conn, query_emb, set(ids))
+        # Should be sorted: exact match first, partial second, orthogonal last
+        assert result[0][0] == ids[1]  # exact match, distance ~0
+        assert result[1][0] == ids[2]  # partial match
+        assert result[2][0] == ids[0]  # orthogonal, distance ~1
 
 
 class TestFillFtsOnlyResults:

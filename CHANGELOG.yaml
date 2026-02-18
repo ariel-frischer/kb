@@ -1,6 +1,18 @@
 releases:
   - version: "unreleased"
     date: null
+    added: []
+    fixed: []
+    changed: []
+    removed: []
+    deprecated: []
+    breaking: []
+    migration: null
+    contributors: ["ariel-frischer"]
+
+  - version: "1.1.0"
+    date: "2026-02-17"
+    summary: "Major search quality release. Adds HyDE best-of-two for smarter vector retrieval, optional query expansion (local FLAN-T5 or LLM), FTS-only keyword search, and an MCP server for AI agent integration. Fixes vec0 distance metric (cosine instead of L2) and tag filtering (now SQL-level pre-filtering). Includes configurable BM25 shortcut thresholds and FTS5 field-weighted BM25 with truncated paths to avoid IDF collapse."
     added:
       - description: "Configurable BM25 shortcut thresholds (`bm25_shortcut_min`, `bm25_shortcut_gap`) for ask mode"
         commits: []

@@ -9,7 +9,9 @@ Two methods:
 """
 
 import logging
+import os
 import time
+import warnings
 
 from openai import OpenAI
 
@@ -57,10 +59,21 @@ def _get_local_model(model_name: str):
             if device != "cpu" and torch.cuda.is_bf16_supported()
             else torch.float32
         )
-        tokenizer = AutoTokenizer.from_pretrained(model_name)
-        model = AutoModelForCausalLM.from_pretrained(model_name, torch_dtype=dtype).to(
-            device
-        )
+        # Suppress noisy HF Hub / transformers warnings during model load
+        _prev_offline = os.environ.get("HF_HUB_DISABLE_IMPLICIT_TOKEN")
+        os.environ["HF_HUB_DISABLE_IMPLICIT_TOKEN"] = "1"
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", message=".*unauthenticated.*")
+            warnings.filterwarnings("ignore", message=".*torch_dtype.*")
+            warnings.filterwarnings("ignore", message=".*tie_word_embeddings.*")
+            tokenizer = AutoTokenizer.from_pretrained(model_name)
+            model = AutoModelForCausalLM.from_pretrained(
+                model_name, dtype=dtype
+            ).to(device)
+        if _prev_offline is None:
+            os.environ.pop("HF_HUB_DISABLE_IMPLICIT_TOKEN", None)
+        else:
+            os.environ["HF_HUB_DISABLE_IMPLICIT_TOKEN"] = _prev_offline
         model.eval()
         _hyde_model_cache[model_name] = (tokenizer, model, device)
     return _hyde_model_cache[model_name]

@@ -1,7 +1,9 @@
 """Reranking: RankGPT (LLM) or local cross-encoder."""
 
+import os
 import re
 import time
+import warnings
 
 from openai import OpenAI
 
@@ -118,7 +120,17 @@ def _get_cross_encoder(model_name: str):
                 "Install it with: pip install 'kb[rerank]' or pip install sentence-transformers"
             )
         device = _get_device()
-        _cross_encoder_cache[model_name] = CrossEncoder(model_name, device=device)
+        _prev = os.environ.get("HF_HUB_DISABLE_IMPLICIT_TOKEN")
+        os.environ["HF_HUB_DISABLE_IMPLICIT_TOKEN"] = "1"
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", message=".*unauthenticated.*")
+            _cross_encoder_cache[model_name] = CrossEncoder(
+                model_name, device=device
+            )
+        if _prev is None:
+            os.environ.pop("HF_HUB_DISABLE_IMPLICIT_TOKEN", None)
+        else:
+            os.environ["HF_HUB_DISABLE_IMPLICIT_TOKEN"] = _prev
     return _cross_encoder_cache[model_name]
 
 

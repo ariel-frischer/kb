@@ -7,7 +7,9 @@ Two methods:
 
 import json
 import logging
+import os
 import time
+import warnings
 
 from openai import OpenAI
 
@@ -78,8 +80,16 @@ def _get_t5_model(model_name: str):
                 "transformers is required for local query expansion. "
                 "Install with: pip install 'kb[expand]' or pip install transformers"
             )
-        tokenizer = AutoTokenizer.from_pretrained(model_name)
-        model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
+        _prev = os.environ.get("HF_HUB_DISABLE_IMPLICIT_TOKEN")
+        os.environ["HF_HUB_DISABLE_IMPLICIT_TOKEN"] = "1"
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", message=".*unauthenticated.*")
+            tokenizer = AutoTokenizer.from_pretrained(model_name)
+            model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
+        if _prev is None:
+            os.environ.pop("HF_HUB_DISABLE_IMPLICIT_TOKEN", None)
+        else:
+            os.environ["HF_HUB_DISABLE_IMPLICIT_TOKEN"] = _prev
         _expand_model_cache[model_name] = (tokenizer, model)
     return _expand_model_cache[model_name]
 

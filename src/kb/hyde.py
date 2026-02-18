@@ -155,7 +155,7 @@ def llm_hyde_passage(
                 {"role": "user", "content": query},
             ],
             temperature=0.7,
-            max_tokens=300,
+            max_tokens=1024,
         )
         passage = (resp.choices[0].message.content or "").strip()
         elapsed = (time.time() - t0) * 1000

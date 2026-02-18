@@ -32,7 +32,7 @@ uv run kb --help        # run locally
 ```
 src/kb/
 ├── cli.py         — Entry point, command dispatch, human-readable output (thin wrappers over api.py)
-├── api.py         — Core logic for search/ask/fts/similar/stats/list (returns dicts, no I/O)
+├── api.py         — Core logic for search/ask/fts/similar/stats/list/feedback (returns dicts, no I/O)
 ├── mcp_server.py  — MCP server (FastMCP, stdio) exposing kb tools for AI agents
 ├── config.py      — .kb.toml loading, Config dataclass, secrets.toml loading
 ├── db.py          — SQLite schema, sqlite-vec connection, migrations

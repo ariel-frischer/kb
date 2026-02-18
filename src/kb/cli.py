@@ -10,12 +10,15 @@ from pathlib import Path
 
 from .api import (
     FileNotIndexedError,
+    KBError,
     NoIndexError,
     NoSearchTermsError,
     _resolve_doc_path,
     ask_core,
+    feedback_core,
     fts_core,
     list_core,
+    list_feedback_core,
     search_core,
     similar_core,
     stats_core,
@@ -63,6 +66,9 @@ Usage:
   kb stats                       Show index statistics and supported formats
   kb reset                       Drop database and start fresh
   kb version                      Show version (also: kb v, kb --version)
+  kb feedback "msg" [--tool T] [--severity bug|suggestion|note] [--context C] [--agent-id A] [--error-trace E]
+                                 Submit feedback (for agents / dev use)
+  kb feedback --list             List all feedback entries
   kb mcp                         Start MCP server (for Claude Desktop / AI agents)
   kb completion <shell>           Output shell completions (zsh, bash, fish)
 
@@ -745,10 +751,90 @@ def cmd_list(cfg: Config, full: bool = False):
     print("\nUse 'kb list --full' for per-file details.")
 
 
+def cmd_feedback(args: list[str]):
+    """Submit or list feedback entries."""
+    if "--list" in args:
+        result = list_feedback_core()
+        if not result["entries"]:
+            print("No feedback entries.")
+            return
+        print(f"{result['count']} feedback entries:\n")
+        for e in result["entries"]:
+            sev = e.get("severity", "note")
+            ts = e.get("timestamp", "?")
+            msg = e.get("message", "")
+            print(f"  [{sev}] {ts}")
+            print(f"    {msg}")
+            if e.get("tool"):
+                print(f"    tool: {e['tool']}")
+            if e.get("agent_id"):
+                print(f"    agent: {e['agent_id']}")
+            if e.get("error_trace"):
+                print(f"    trace: {e['error_trace']}")
+            print()
+        return
+
+    # Parse flags
+    message = ""
+    tool = ""
+    severity = "note"
+    context = ""
+    agent_id = ""
+    error_trace = ""
+
+    i = 0
+    while i < len(args):
+        if args[i] == "--tool" and i + 1 < len(args):
+            tool = args[i + 1]
+            i += 2
+        elif args[i] == "--severity" and i + 1 < len(args):
+            severity = args[i + 1]
+            i += 2
+        elif args[i] == "--context" and i + 1 < len(args):
+            context = args[i + 1]
+            i += 2
+        elif args[i] == "--agent-id" and i + 1 < len(args):
+            agent_id = args[i + 1]
+            i += 2
+        elif args[i] == "--error-trace" and i + 1 < len(args):
+            error_trace = args[i + 1]
+            i += 2
+        elif args[i].startswith("--"):
+            print(f"Unknown flag: {args[i]}")
+            sys.exit(1)
+        elif not message:
+            message = args[i]
+            i += 1
+        else:
+            print(f"Unexpected argument: {args[i]}")
+            sys.exit(1)
+
+    if not message:
+        print(
+            'Usage: kb feedback "message" [--tool T] [--severity bug|suggestion|note]'
+        )
+        sys.exit(1)
+
+    try:
+        entry = feedback_core(
+            message,
+            tool=tool,
+            severity=severity,
+            context=context,
+            agent_id=agent_id,
+            error_trace=error_trace,
+        )
+    except KBError as e:
+        print(str(e))
+        sys.exit(1)
+
+    print(f"Feedback recorded [{entry['severity']}]: {entry['message']}")
+
+
 def cmd_completion(shell: str):
     subcommands = (
         "init add remove sources index allow search fts ask similar "
-        "tag untag tags stats reset list version mcp completion"
+        "tag untag tags stats reset list feedback version mcp completion"
     )
 
     if shell == "zsh":
@@ -779,6 +865,9 @@ _kb() {{
       init)
         COMPREPLY=( $(compgen -W "--project" -- "$cur") )
         ;;
+      feedback)
+        COMPREPLY=( $(compgen -W "--list --tool --severity --context --agent-id --error-trace" -- "$cur") )
+        ;;
       search|ask)
         COMPREPLY=( $(compgen -W "--threshold --expand --no-expand --json --csv --md" -- "$cur") )
         ;;
@@ -802,6 +891,10 @@ complete -F _kb kb"""
             "complete -c kb -n '__fish_seen_subcommand_from add remove index allow' -F"
         )
         print("complete -c kb -n '__fish_seen_subcommand_from init' -a '--project'")
+        print(
+            "complete -c kb -n '__fish_seen_subcommand_from feedback' "
+            "-a '--list --tool --severity --context --agent-id --error-trace'"
+        )
         print(
             "complete -c kb -n '__fish_seen_subcommand_from search ask' "
             "-a '--threshold --expand --no-expand --json --csv --md'"
@@ -852,6 +945,17 @@ def main():
             print("Usage: kb completion <zsh|bash|fish>")
             sys.exit(0 if len(args) > 1 and args[1] in ("-h", "--help") else 1)
         cmd_completion(args[1])
+        sys.exit(0)
+
+    if cmd == "feedback":
+        if len(args) > 1 and args[1] in ("-h", "--help"):
+            print(
+                'Usage: kb feedback "msg" [--tool T] [--severity bug|suggestion|note] '
+                "[--context C] [--agent-id A] [--error-trace E]"
+            )
+            print("       kb feedback --list")
+            sys.exit(0)
+        cmd_feedback(args[1:])
         sys.exit(0)
 
     if cmd == "mcp":

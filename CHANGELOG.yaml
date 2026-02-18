@@ -1,7 +1,9 @@
 releases:
   - version: "unreleased"
     date: null
-    added: []
+    added:
+      - description: "`kb feedback` CLI command and `kb_feedback` MCP tool for agents to submit bug reports, suggestions, and notes (appends to `~/.local/share/kb/feedback.yml`)"
+        commits: []
     fixed: []
     changed: []
     removed: []

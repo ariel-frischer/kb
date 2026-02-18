@@ -7,6 +7,7 @@ from mcp.server.fastmcp import FastMCP
 from .api import (
     KBError,
     ask_core,
+    feedback_core,
     fts_core,
     list_core,
     search_core,
@@ -133,6 +134,40 @@ def kb_status() -> dict:
 def kb_list() -> dict:
     """List all indexed documents with type, size, and chunk count."""
     return list_core(_get_config())
+
+
+@mcp.tool()
+def kb_feedback(
+    message: str,
+    tool: str = "",
+    severity: str = "note",
+    context: str = "",
+    agent_id: str = "",
+    error_trace: str = "",
+) -> dict:
+    """Submit feedback about kb (bug reports, suggestions, notes).
+
+    Appends to a local YAML file for dev review. No config needed.
+
+    Args:
+        message: The feedback message (required).
+        tool: Which kb tool the feedback is about (e.g. "kb_search").
+        severity: One of "bug", "suggestion", or "note".
+        context: Additional context (query that failed, environment info, etc.).
+        agent_id: Identifier for the calling agent.
+        error_trace: Error traceback or log snippet.
+    """
+    try:
+        return feedback_core(
+            message,
+            tool=tool,
+            severity=severity,
+            context=context,
+            agent_id=agent_id,
+            error_trace=error_trace,
+        )
+    except KBError as e:
+        return {"error": str(e)}
 
 
 def main():

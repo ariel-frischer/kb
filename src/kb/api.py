@@ -3,11 +3,12 @@
 import sqlite3
 import time
 from copy import copy
+from datetime import datetime, timezone
 from pathlib import Path
 
 from openai import OpenAI
 
-from .config import Config
+from .config import GLOBAL_DATA_DIR, Config
 from .db import connect
 from .embed import deserialize_f32, embed_batch, serialize_f32
 from .expand import expand_query
@@ -880,3 +881,137 @@ def list_core(cfg: Config) -> dict:
         "doc_count": len(documents),
         "documents": documents,
     }
+
+
+# ---------------------------------------------------------------------------
+# Feedback
+# ---------------------------------------------------------------------------
+
+FEEDBACK_PATH = GLOBAL_DATA_DIR / "feedback.yml"
+_VALID_SEVERITIES = ("bug", "suggestion", "note")
+
+
+def _yaml_escape(s: str) -> str:
+    """Escape a string for safe inclusion in a YAML value (block scalar not needed)."""
+    if not s:
+        return '""'
+    # Use double-quoted scalar if the string contains special chars
+    if any(
+        c in s
+        for c in (
+            ":",
+            "#",
+            "'",
+            '"',
+            "\n",
+            "{",
+            "}",
+            "[",
+            "]",
+            ",",
+            "&",
+            "*",
+            "!",
+            "|",
+            ">",
+            "%",
+            "@",
+            "`",
+        )
+    ):
+        escaped = s.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+        return f'"{escaped}"'
+    return s
+
+
+def _feedback_entry_to_yaml(entry: dict) -> str:
+    """Serialize a feedback entry dict to a YAML string (manual, no deps)."""
+    lines = ["- timestamp: " + entry["timestamp"]]
+    lines.append("  kb_version: " + _yaml_escape(entry["kb_version"]))
+    lines.append("  message: " + _yaml_escape(entry["message"]))
+    lines.append("  severity: " + entry["severity"])
+    for key in ("tool", "context", "agent_id", "error_trace"):
+        if entry.get(key):
+            lines.append(f"  {key}: " + _yaml_escape(entry[key]))
+    return "\n".join(lines) + "\n"
+
+
+def _parse_feedback_yaml(text: str) -> list[dict]:
+    """Parse the feedback YAML file into a list of entry dicts (minimal parser)."""
+    entries: list[dict] = []
+    current: dict | None = None
+    for raw_line in text.splitlines():
+        line = raw_line.rstrip()
+        if line.startswith("- "):
+            if current is not None:
+                entries.append(current)
+            current = {}
+            line = "  " + line[2:]  # normalize to indented key
+        if current is None:
+            continue
+        if line.startswith("  ") and ":" in line:
+            key, _, val = line.strip().partition(":")
+            val = val.strip()
+            # Unquote double-quoted values
+            if val.startswith('"') and val.endswith('"') and len(val) >= 2:
+                val = (
+                    val[1:-1]
+                    .replace("\\n", "\n")
+                    .replace('\\"', '"')
+                    .replace("\\\\", "\\")
+                )
+            elif val == '""':
+                val = ""
+            current[key] = val
+    if current is not None:
+        entries.append(current)
+    return entries
+
+
+def feedback_core(
+    message: str,
+    tool: str = "",
+    severity: str = "note",
+    context: str = "",
+    agent_id: str = "",
+    error_trace: str = "",
+) -> dict:
+    """Submit a feedback entry. Returns the entry dict."""
+    if not message or not message.strip():
+        raise KBError("Feedback message cannot be empty.")
+    if severity not in _VALID_SEVERITIES:
+        raise KBError(
+            f"Invalid severity '{severity}'. Must be one of: {', '.join(_VALID_SEVERITIES)}"
+        )
+
+    from importlib.metadata import version
+
+    entry = {
+        "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "kb_version": version("kb"),
+        "message": message.strip(),
+        "severity": severity,
+        "tool": tool,
+        "context": context,
+        "agent_id": agent_id,
+        "error_trace": error_trace,
+    }
+
+    FEEDBACK_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with open(FEEDBACK_PATH, "a") as f:
+        f.write(_feedback_entry_to_yaml(entry))
+
+    return entry
+
+
+def list_feedback_core() -> dict:
+    """List all feedback entries. Returns dict with entries list."""
+    if not FEEDBACK_PATH.exists():
+        return {"count": 0, "entries": []}
+
+    text = FEEDBACK_PATH.read_text()
+    if not text.strip():
+        return {"count": 0, "entries": []}
+
+    entries = _parse_feedback_yaml(text)
+    return {"count": len(entries), "entries": entries}

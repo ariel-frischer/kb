@@ -1,7 +1,9 @@
 releases:
   - version: "unreleased"
     date: null
-    added: []
+    added:
+      - description: "HyDE LLM provider override — `hyde_base_url` and `hyde_api_key` config fields allow using a separate OpenAI-compatible provider for HyDE passage generation (e.g. Google Gemini free tier). API keys support `env:VAR_NAME` syntax for env var resolution"
+        commits: []
     fixed: []
     changed: []
     removed: []

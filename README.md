@@ -151,6 +151,8 @@ sources = [
 # hyde_model = ""           # LLM for HyDE ("" = use chat_model)
 # hyde_method = "llm"      # "llm" (OpenAI API) or "local" (transformers, no API cost)
 # hyde_local_model = "Qwen/Qwen3-0.6B"  # HF model for local HyDE method
+# hyde_base_url = ""        # base URL for HyDE LLM ("" = use default OpenAI)
+# hyde_api_key = ""         # API key for HyDE LLM ("" = use default; supports "env:VAR_NAME")
 # query_expand = false     # generate keyword + semantic query expansions (also --expand flag)
 # expand_method = "local"  # "local" (FLAN-T5) or "llm" (OpenAI API)
 # expand_model = "google/flan-t5-small"  # model for local expand method

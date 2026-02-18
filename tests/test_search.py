@@ -17,6 +17,21 @@ from kb.search import (
 )
 
 
+@pytest.fixture
+def db_conn_4d(tmp_path):
+    """Live sqlite connection with 4-dim vec0 schema for vec tests."""
+    from kb.db import connect
+
+    cfg = Config(embed_dims=4)
+    cfg.scope = "project"
+    cfg.config_dir = tmp_path
+    cfg.config_path = tmp_path / ".kb.toml"
+    cfg.db_path = tmp_path / "kb.db"
+    conn = connect(cfg)
+    yield conn
+    conn.close()
+
+
 class TestFtsEscape:
     def test_single_word(self):
         assert fts_escape("hello") == '"hello"*'
@@ -212,37 +227,37 @@ class TestRunVecQueryFiltered:
         conn.commit()
         return chunk_ids
 
-    def test_returns_only_allowed_ids(self, db_conn):
+    def test_returns_only_allowed_ids(self, db_conn_4d):
         embs = [
             [1.0, 0.0, 0.0, 0.0],
             [0.0, 1.0, 0.0, 0.0],
             [0.7, 0.7, 0.0, 0.0],
         ]
-        ids = self._insert_vec_chunks(db_conn, embs)
+        ids = self._insert_vec_chunks(db_conn_4d, embs)
         query_emb = struct.pack("4f", 1.0, 0.0, 0.0, 0.0)
         # Only allow first and third chunks
-        result = run_vec_query_filtered(db_conn, query_emb, {ids[0], ids[2]})
+        result = run_vec_query_filtered(db_conn_4d, query_emb, {ids[0], ids[2]})
         returned_ids = {r[0] for r in result}
         assert returned_ids == {ids[0], ids[2]}
         # First chunk (exact match) should have distance ~0
         assert result[0][0] == ids[0]
         assert result[0][1] == pytest.approx(0.0, abs=1e-6)
 
-    def test_empty_allowed_ids(self, db_conn):
+    def test_empty_allowed_ids(self, db_conn_4d):
         embs = [[1.0, 0.0, 0.0, 0.0]]
-        self._insert_vec_chunks(db_conn, embs)
+        self._insert_vec_chunks(db_conn_4d, embs)
         query_emb = struct.pack("4f", 1.0, 0.0, 0.0, 0.0)
-        assert run_vec_query_filtered(db_conn, query_emb, set()) == []
+        assert run_vec_query_filtered(db_conn_4d, query_emb, set()) == []
 
-    def test_results_sorted_by_distance(self, db_conn):
+    def test_results_sorted_by_distance(self, db_conn_4d):
         embs = [
             [0.0, 1.0, 0.0, 0.0],  # orthogonal to query
             [1.0, 0.0, 0.0, 0.0],  # exact match
             [0.7, 0.7, 0.0, 0.0],  # partial match
         ]
-        ids = self._insert_vec_chunks(db_conn, embs)
+        ids = self._insert_vec_chunks(db_conn_4d, embs)
         query_emb = struct.pack("4f", 1.0, 0.0, 0.0, 0.0)
-        result = run_vec_query_filtered(db_conn, query_emb, set(ids))
+        result = run_vec_query_filtered(db_conn_4d, query_emb, set(ids))
         # Should be sorted: exact match first, partial second, orthogonal last
         assert result[0][0] == ids[1]  # exact match, distance ~0
         assert result[1][0] == ids[2]  # partial match

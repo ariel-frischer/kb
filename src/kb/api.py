@@ -192,7 +192,12 @@ def search_core(
         # Best-of-two vec: embed query + HyDE, pick better result set
         t0 = time.time()
         primary_vec, embed_ms = _pick_best_vec(
-            conn, client, clean_query, hyde_passage, retrieve_k, cfg,
+            conn,
+            client,
+            clean_query,
+            hyde_passage,
+            retrieve_k,
+            cfg,
             tagged_ids=tagged_chunk_ids,
         )
 
@@ -249,7 +254,12 @@ def search_core(
     else:
         t0 = time.time()
         vec_results, embed_ms = _pick_best_vec(
-            conn, client, clean_query, hyde_passage, retrieve_k, cfg,
+            conn,
+            client,
+            clean_query,
+            hyde_passage,
+            retrieve_k,
+            cfg,
             tagged_ids=tagged_chunk_ids,
         )
         vec_ms = (time.time() - t0) * 1000 - embed_ms
@@ -505,7 +515,12 @@ def ask_core(
             # Best-of-two vec: embed query + HyDE, pick better result set
             t0 = time.time()
             primary_vec, embed_ms = _pick_best_vec(
-                conn, client, clean_question, hyde_passage, retrieve_k, cfg,
+                conn,
+                client,
+                clean_question,
+                hyde_passage,
+                retrieve_k,
+                cfg,
                 tagged_ids=tagged_chunk_ids_ask,
             )
 
@@ -539,9 +554,7 @@ def ask_core(
                 ]
             else:
                 primary_fts = run_fts_query(conn, clean_question, retrieve_k)
-                exp_fts = [
-                    run_fts_query(conn, e["text"], retrieve_k) for e in lex_exps
-                ]
+                exp_fts = [run_fts_query(conn, e["text"], retrieve_k) for e in lex_exps]
             search_ms = (time.time() - t0) * 1000 - embed_ms
 
             all_lists = [
@@ -558,7 +571,12 @@ def ask_core(
         else:
             t0 = time.time()
             vec_results, embed_ms = _pick_best_vec(
-                conn, client, clean_question, hyde_passage, retrieve_k, cfg,
+                conn,
+                client,
+                clean_question,
+                hyde_passage,
+                retrieve_k,
+                cfg,
                 tagged_ids=tagged_chunk_ids_ask,
             )
 

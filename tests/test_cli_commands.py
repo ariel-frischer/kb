@@ -167,6 +167,32 @@ class TestCmdSearch:
         assert "Embed:" in out
         assert "Vec:" in out
 
+    def test_human_search_output_uses_color_when_forced(
+        self, populated_db, capsys, monkeypatch
+    ):
+        monkeypatch.delenv("NO_COLOR", raising=False)
+        monkeypatch.setenv("FORCE_COLOR", "1")
+        client = _mock_openai_client(embed_dims=4)
+        with patch("kb.api.OpenAI", return_value=client):
+            cmd_search("install", populated_db, top_k=5)
+
+        out = capsys.readouterr().out
+        assert "\x1b[" in out
+        assert "Query:" in out
+        assert '"install"' in out
+
+    def test_json_search_output_never_uses_color(
+        self, populated_db, capsys, monkeypatch
+    ):
+        monkeypatch.delenv("NO_COLOR", raising=False)
+        monkeypatch.setenv("FORCE_COLOR", "1")
+        client = _mock_openai_client(embed_dims=4)
+        with patch("kb.api.OpenAI", return_value=client):
+            cmd_search("install", populated_db, top_k=5, output_format="json")
+
+        out = capsys.readouterr().out
+        assert "\x1b[" not in out
+
     def test_search_with_filter(self, populated_db, capsys):
         client = _mock_openai_client(embed_dims=4)
         with patch("kb.api.OpenAI", return_value=client):

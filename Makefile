@@ -1,7 +1,12 @@
-.PHONY: install install-dev lint format test check clean changelog
+.PHONY: install install-global install-global-minimal install-dev lint format test check clean changelog
 
 install:  ## Install with all features
 	uv tool install "kb[all] @ ." --force --reinstall
+
+install-global: install  ## Install kb globally with all features
+
+install-global-minimal:  ## Install kb globally with minimal dependencies
+	uv tool install "kb @ ." --force --reinstall
 
 install-dev:  ## Install dev environment
 	uv sync --all-extras

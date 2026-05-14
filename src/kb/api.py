@@ -9,6 +9,13 @@ from pathlib import Path
 from openai import OpenAI
 
 from .config import GLOBAL_DATA_DIR, Config
+from .cost import (
+    chat_cost_usd,
+    cost_summary,
+    embed_cost_usd,
+    estimate_tokens,
+    usage_tokens,
+)
 from .db import connect
 from .embed import deserialize_f32, embed_batch, serialize_f32
 from .expand import expand_query
@@ -19,7 +26,7 @@ from .filters import (
     parse_filters,
     remove_tag_filter,
 )
-from .hyde import generate_hyde_passage
+from .hyde import generate_hyde_passage, generate_hyde_passage_with_usage
 from .rerank import rerank
 from .search import (
     fill_fts_only_results,
@@ -95,6 +102,41 @@ def _resolve_doc_path(
 def _require_index(cfg: Config) -> None:
     if not cfg.db_path.exists():
         raise NoIndexError("No index found. Run 'kb index' first.")
+
+
+def _chat_cost_item(
+    *,
+    name: str,
+    model: str,
+    prompt_tokens: int,
+    completion_tokens: int,
+    estimated_tokens: bool = False,
+) -> dict:
+    return {
+        "name": name,
+        "model": model,
+        "prompt_tokens": prompt_tokens,
+        "completion_tokens": completion_tokens,
+        "estimated_tokens": estimated_tokens,
+        "usd": chat_cost_usd(model, prompt_tokens, completion_tokens),
+    }
+
+
+def _embedding_cost_item(name: str, cfg: Config, texts: list[str]) -> dict:
+    tokens = sum(estimate_tokens(text) for text in texts)
+    if cfg.embed_method == "local":
+        model = cfg.local_embed_model
+        usd = 0.0
+    else:
+        model = cfg.embed_model
+        usd = embed_cost_usd(model, tokens)
+    return {
+        "name": name,
+        "model": model,
+        "tokens": tokens,
+        "estimated_tokens": True,
+        "usd": usd,
+    }
 
 
 def _pick_best_vec(
@@ -465,8 +507,10 @@ def ask_core(
 
     rerank_info = None
     hyde_ms = 0.0
+    hyde_usage = None
     expand_ms = 0.0
     expansions: list[dict] = []
+    cost_items: list[dict] = []
 
     if bm25_shortcut:
         t0 = time.time()
@@ -500,7 +544,19 @@ def ask_core(
     else:
         hyde_passage = None
         if cfg.hyde_enabled:
-            hyde_passage, hyde_ms = generate_hyde_passage(clean_question, client, cfg)
+            hyde_passage, hyde_ms, hyde_usage = generate_hyde_passage_with_usage(
+                clean_question, client, cfg
+            )
+            if hyde_usage:
+                cost_items.append(
+                    _chat_cost_item(
+                        name="hyde",
+                        model=hyde_usage["model"],
+                        prompt_tokens=hyde_usage["prompt_tokens"],
+                        completion_tokens=hyde_usage["completion_tokens"],
+                        estimated_tokens=hyde_usage["estimated_tokens"],
+                    )
+                )
 
         retrieve_k = max(cfg.rerank_fetch_k, top_k * 3)
 
@@ -526,11 +582,22 @@ def ask_core(
                 cfg,
                 tagged_ids=tagged_chunk_ids_ask,
             )
+            primary_embed_texts = [clean_question]
+            if hyde_passage:
+                primary_embed_texts.append(hyde_passage)
+            cost_items.append(
+                _embedding_cost_item("query_embeddings", cfg, primary_embed_texts)
+            )
 
             # Batch embed vec expansions
             if vec_exps:
                 exp_embeddings = embed_batch(
                     client, [e["text"] for e in vec_exps], cfg, is_query=True
+                )
+                cost_items.append(
+                    _embedding_cost_item(
+                        "expansion_embeddings", cfg, [e["text"] for e in vec_exps]
+                    )
                 )
                 if tagged_chunk_ids_ask is not None:
                     exp_vec = [
@@ -584,6 +651,12 @@ def ask_core(
                 cfg,
                 tagged_ids=tagged_chunk_ids_ask,
             )
+            primary_embed_texts = [clean_question]
+            if hyde_passage:
+                primary_embed_texts.append(hyde_passage)
+            cost_items.append(
+                _embedding_cost_item("query_embeddings", cfg, primary_embed_texts)
+            )
 
             if tagged_chunk_ids_ask is not None:
                 fts_results_ask = run_fts_query_filtered(
@@ -615,6 +688,15 @@ def ask_core(
 
         if len(results) > cfg.rerank_top_k:
             results, rerank_info = rerank(client, clean_question, results, cfg)
+            if rerank_info and "prompt_tokens" in rerank_info:
+                cost_items.append(
+                    _chat_cost_item(
+                        name="rerank",
+                        model=cfg.chat_model,
+                        prompt_tokens=rerank_info["prompt_tokens"],
+                        completion_tokens=rerank_info["completion_tokens"],
+                    )
+                )
 
     filtered = [
         r
@@ -644,6 +726,7 @@ def ask_core(
             "rerank": rerank_info,
             "timing_ms": timing,
             "tokens": {"prompt": 0, "completion": 0},
+            "cost": cost_summary(cost_items),
             "sources": [],
         }
         if cfg.query_expand:
@@ -701,6 +784,26 @@ def ask_core(
     answer = chat_resp.choices[0].message.content
     gen_ms = (time.time() - t0) * 1000
     tokens = chat_resp.usage
+    prompt_tokens, completion_tokens = usage_tokens(tokens)
+    if prompt_tokens is None or completion_tokens is None:
+        prompt_tokens = estimate_tokens(
+            "You answer questions based on the provided context from a personal knowledge base. "
+            "Be direct and concise. If the context doesn't contain enough information, say so. "
+            "Cite sources by their number [1], [2], etc. when referencing specific information."
+        ) + estimate_tokens(f"Context:\n{context}\n\n---\nQuestion: {clean_question}")
+        completion_tokens = estimate_tokens(answer or "")
+        answer_tokens_estimated = True
+    else:
+        answer_tokens_estimated = False
+    cost_items.append(
+        _chat_cost_item(
+            name="answer",
+            model=cfg.chat_model,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            estimated_tokens=answer_tokens_estimated,
+        )
+    )
 
     conn.close()
 
@@ -715,9 +818,10 @@ def ask_core(
         "rerank": rerank_info,
         "timing_ms": timing,
         "tokens": {
-            "prompt": tokens.prompt_tokens,
-            "completion": tokens.completion_tokens,
+            "prompt": prompt_tokens,
+            "completion": completion_tokens,
         },
+        "cost": cost_summary(cost_items),
         "sources": [
             {"rank": i + 1, "doc_path": path, "heading": heading}
             for i, (path, heading) in enumerate(source_entries)

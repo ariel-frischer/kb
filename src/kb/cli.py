@@ -37,9 +37,11 @@ from .config import (
     load_secrets,
     save_config,
 )
+from .cost import format_usd
 from .db import connect, reset
 from .extract import supported_extensions, unavailable_formats
 from .ingest import index_directory
+from .terminal import label, print_error, result_header, style
 
 USAGE = """\
 kb — CLI knowledge base powered by sqlite-vec
@@ -98,34 +100,39 @@ def cmd_init(project: bool):
     if project:
         cfg_path = Path.cwd() / PROJECT_CONFIG_FILE
         if cfg_path.exists():
-            print(f"{PROJECT_CONFIG_FILE} already exists at {cfg_path}")
+            print_error(f"{PROJECT_CONFIG_FILE} already exists at {cfg_path}")
             sys.exit(1)
         cfg_path.write_text(PROJECT_CONFIG_TEMPLATE)
-        print(f"Created {cfg_path}")
+        print(style(f"Created {cfg_path}", "success"))
         db_path = _project_db_path(Path.cwd())
-        print(f"Database: {db_path}")
-        print("Edit 'sources' to add directories to index, then run: kb index")
+        print(label("Database", style(db_path, "path")))
+        print(
+            style(
+                "Edit 'sources' to add directories to index, then run: kb index",
+                "muted",
+            )
+        )
     else:
         if GLOBAL_CONFIG_FILE.exists():
-            print(f"Global config already exists at {GLOBAL_CONFIG_FILE}")
+            print_error(f"Global config already exists at {GLOBAL_CONFIG_FILE}")
             sys.exit(1)
         GLOBAL_CONFIG_DIR.mkdir(parents=True, exist_ok=True)
         GLOBAL_DATA_DIR.mkdir(parents=True, exist_ok=True)
         GLOBAL_CONFIG_FILE.write_text(GLOBAL_CONFIG_TEMPLATE)
-        print(f"Created {GLOBAL_CONFIG_FILE}")
-        print(f"Database: {GLOBAL_DATA_DIR / 'kb.db'}")
-        print("Add sources with: kb add ~/notes ~/docs")
+        print(style(f"Created {GLOBAL_CONFIG_FILE}", "success"))
+        print(label("Database", style(GLOBAL_DATA_DIR / "kb.db", "path")))
+        print(style("Add sources with: kb add ~/notes ~/docs", "muted"))
 
 
 def cmd_add(cfg: Config, dirs: list[str]):
     if not dirs:
-        print("Usage: kb add <dir> [dir...]")
+        print_error("Usage: kb add <dir> [dir...]")
         sys.exit(1)
 
     for d in dirs:
         p = Path(d).expanduser().resolve()
         if not p.is_dir():
-            print(f"Not a directory: {d}")
+            print_error(f"Not a directory: {d}")
             sys.exit(1)
 
         if cfg.scope == "global":
@@ -137,19 +144,19 @@ def cmd_add(cfg: Config, dirs: list[str]):
                 entry = str(p)
 
         if entry in cfg.sources:
-            print(f"  Already added: {entry}")
+            print(f"  {style('Already added:', 'warning')} {style(entry, 'path')}")
             continue
 
         cfg.sources.append(entry)
-        print(f"  Added: {entry}")
+        print(f"  {style('Added:', 'success')} {style(entry, 'path')}")
 
     save_config(cfg)
-    print(f"Saved {cfg.config_path}")
+    print(style(f"Saved {cfg.config_path}", "success"))
 
 
 def cmd_remove(cfg: Config, dirs: list[str]):
     if not dirs:
-        print("Usage: kb remove <dir> [dir...]")
+        print_error("Usage: kb remove <dir> [dir...]")
         sys.exit(1)
 
     for d in dirs:
@@ -164,37 +171,37 @@ def cmd_remove(cfg: Config, dirs: list[str]):
 
         if entry in cfg.sources:
             cfg.sources.remove(entry)
-            print(f"  Removed: {entry}")
+            print(f"  {style('Removed:', 'success')} {style(entry, 'path')}")
         else:
-            print(f"  Not found: {entry}")
+            print(f"  {style('Not found:', 'warning')} {style(entry, 'path')}")
 
     save_config(cfg)
-    print(f"Saved {cfg.config_path}")
+    print(style(f"Saved {cfg.config_path}", "success"))
 
 
 def cmd_sources(cfg: Config):
     if not cfg.sources:
-        print("No sources configured. Run: kb add <dir>")
+        print(style("No sources configured. Run: kb add <dir>", "warning"))
         return
     for s in cfg.sources:
         p = Path(s).expanduser() if cfg.scope == "global" else cfg.config_dir / s
         exists = p.is_dir()
-        marker = " " if exists else " (missing)"
-        print(f"  {s}{marker}")
+        marker = " " if exists else style(" (missing)", "warning")
+        print(f"  {style(s, 'path')}{marker}")
 
 
 def cmd_allow(cfg: Config, files: list[str]):
     if not files:
-        print("Usage: kb allow <file> [file...]")
+        print_error("Usage: kb allow <file> [file...]")
         sys.exit(1)
     if not cfg.config_path:
-        print("No config found. Run 'kb init' first.")
+        print_error("No config found. Run 'kb init' first.")
         sys.exit(1)
 
     for f in files:
         p = Path(f).expanduser().resolve()
         if not p.is_file():
-            print(f"Not a file: {f}")
+            print_error(f"Not a file: {f}")
             sys.exit(1)
 
         if cfg.scope == "global":
@@ -206,14 +213,14 @@ def cmd_allow(cfg: Config, files: list[str]):
                 entry = str(p)
 
         if entry in cfg.allowed_large_files:
-            print(f"  Already allowed: {entry}")
+            print(f"  {style('Already allowed:', 'warning')} {style(entry, 'path')}")
             continue
 
         cfg.allowed_large_files.append(entry)
-        print(f"  Allowed: {entry}")
+        print(f"  {style('Allowed:', 'success')} {style(entry, 'path')}")
 
     save_config(cfg)
-    print(f"Saved {cfg.config_path}")
+    print(style(f"Saved {cfg.config_path}", "success"))
 
 
 def cmd_index(cfg: Config, args: list[str]):
@@ -225,14 +232,14 @@ def cmd_index(cfg: Config, args: list[str]):
     elif cfg.source_paths:
         dirs = cfg.source_paths
     else:
-        print("No sources configured. Either:")
+        print(style("No sources configured. Either:", "warning"))
         print("  1. Run 'kb add <dir>' to add source directories")
         print("  2. Pass directories explicitly: kb index ~/docs ~/notes")
         sys.exit(1)
 
     for dir_path in dirs:
         if not dir_path.is_dir():
-            print(f"Not a directory: {dir_path}")
+            print_error(f"Not a directory: {dir_path}")
             sys.exit(1)
         index_directory(dir_path, cfg, no_size_limit=no_size_limit)
 
@@ -306,7 +313,7 @@ def cmd_search(
     try:
         result = search_core(query, cfg, top_k, threshold)
     except NoIndexError as e:
-        print(str(e))
+        print_error(str(e))
         sys.exit(1)
 
     if output_format == "json":
@@ -337,16 +344,29 @@ def cmd_search(
     candidates = result["candidates"]
 
     if result.get("filters"):
-        print(f"Filters: {', '.join(f'{k}={v}' for k, v in result['filters'].items())}")
+        print(
+            label(
+                "Filters",
+                ", ".join(f"{k}={v}" for k, v in result["filters"].items()),
+            )
+        )
 
-    print(f'Query: "{clean_query}"')
+    print(label("Query", f'"{clean_query}"'))
     hyde_tag = f"HyDE: {timing['hyde']}ms | " if timing.get("hyde") else ""
     expand_tag = f"Expand: {timing['expand']}ms | " if timing.get("expand") else ""
     print(
-        f"{hyde_tag}{expand_tag}Embed: {timing['embed']}ms | Vec: {timing['vec']}ms | FTS: {timing['fts']}ms"
+        style(
+            f"{hyde_tag}{expand_tag}Embed: {timing['embed']}ms | "
+            f"Vec: {timing['vec']}ms | FTS: {timing['fts']}ms",
+            "metric",
+        )
     )
     print(
-        f"Candidates: {candidates['vec']} vec, {candidates['fts']} fts -> {candidates['fused']} fused"
+        style(
+            f"Candidates: {candidates['vec']} vec, {candidates['fts']} fts -> "
+            f"{candidates['fused']} fused",
+            "muted",
+        )
     )
 
     if result.get("expansions"):
@@ -357,7 +377,7 @@ def cmd_search(
             parts.append(f"lex{lex}")
         if vec:
             parts.append(f"vec{vec}")
-        print(f"Expansions: {' '.join(parts)}")
+        print(label("Expansions", " ".join(parts)))
 
     print()
 
@@ -367,14 +387,19 @@ def cmd_search(
         )
         source_tag = "+".join(r["sources"])
         print(
-            f"--- [{r['rank']}] {r['doc_path']} ({sim}, {source_tag}, rrf:{r['rrf_score']:.4f}) ---"
+            result_header(
+                r["rank"],
+                r["doc_path"],
+                f"{sim}, {source_tag}, rrf:{r['rrf_score']:.4f}",
+            )
         )
         if r["heading"]:
-            print(f"    Section: {r['heading']}")
+            print(f"    {label('Section', style(r['heading'], 'heading'))}")
         preview = _best_snippet(r["text"] or "", clean_query).replace("\n", "\n    ")
         print(f"    {preview}")
         if r["text"] and len(r["text"]) > 500:
-            print(f"    ({len(r['text'])} chars total)")
+            total_chars = len(r["text"])
+            print(f"    {style(f'({total_chars} chars total)', 'muted')}")
         print()
 
 
@@ -388,10 +413,10 @@ def cmd_fts(
     try:
         result = fts_core(query, cfg, top_k)
     except NoIndexError as e:
-        print(str(e))
+        print_error(str(e))
         sys.exit(1)
     except NoSearchTermsError as e:
-        print(str(e))
+        print_error(str(e))
         sys.exit(1)
 
     if output_format == "json":
@@ -411,20 +436,26 @@ def cmd_fts(
     fts_ms = result["timing_ms"]["fts"]
 
     if result.get("filters"):
-        print(f"Filters: {', '.join(f'{k}={v}' for k, v in result['filters'].items())}")
+        print(
+            label(
+                "Filters",
+                ", ".join(f"{k}={v}" for k, v in result["filters"].items()),
+            )
+        )
 
-    print(f'Query: "{clean_query}"')
-    print(f"FTS: {fts_ms}ms | {len(result['results'])} results\n")
+    print(label("Query", f'"{clean_query}"'))
+    print(style(f"FTS: {fts_ms}ms | {len(result['results'])} results\n", "metric"))
 
     for r in result["results"]:
         bm25_str = f"bm25:{r['bm25']:.3f}"
-        print(f"--- [{r['rank']}] {r['doc_path']} ({bm25_str}) ---")
+        print(result_header(r["rank"], r["doc_path"], bm25_str))
         if r["heading"]:
-            print(f"    Section: {r['heading']}")
+            print(f"    {label('Section', style(r['heading'], 'heading'))}")
         preview = _best_snippet(r["text"] or "", clean_query).replace("\n", "\n    ")
         print(f"    {preview}")
         if r["text"] and len(r["text"]) > 500:
-            print(f"    ({len(r['text'])} chars total)")
+            total_chars = len(r["text"])
+            print(f"    {style(f'({total_chars} chars total)', 'muted')}")
         print()
 
 
@@ -439,7 +470,7 @@ def cmd_ask(
     try:
         result = ask_core(question, cfg, top_k, threshold)
     except NoIndexError as e:
-        print(str(e))
+        print_error(str(e))
         sys.exit(1)
 
     if output_format == "json":
@@ -452,6 +483,7 @@ def cmd_ask(
             "filters": result.get("filters", {}),
             "timing_ms": result["timing_ms"],
             "tokens": result["tokens"],
+            "cost": result.get("cost"),
             "sources": result["sources"],
             "result_count": result.get("result_count"),
             "filtered_count": result.get("filtered_count"),
@@ -483,14 +515,24 @@ def cmd_ask(
     rerank_info = result.get("rerank")
 
     if result.get("filters"):
-        print(f"Filters: {', '.join(f'{k}={v}' for k, v in result['filters'].items())}")
+        print(
+            label(
+                "Filters",
+                ", ".join(f"{k}={v}" for k, v in result["filters"].items()),
+            )
+        )
 
     shortcut_tag = " (bm25 shortcut)" if bm25_shortcut else ""
     hyde_tag = f"hyde: {timing['hyde']}ms | " if timing.get("hyde") else ""
     expand_tag = f"expand: {timing['expand']}ms | " if timing.get("expand") else ""
-    print(f"Q: {clean_question}")
+    print(label("Q", clean_question))
     print(
-        f"({hyde_tag}{expand_tag}embed: {timing['embed']}ms | search: {timing['search']}ms | generate: {timing['generate']}ms{shortcut_tag})"
+        style(
+            f"({hyde_tag}{expand_tag}embed: {timing['embed']}ms | "
+            f"search: {timing['search']}ms | generate: "
+            f"{timing['generate']}ms{shortcut_tag})",
+            "metric",
+        )
     )
 
     if result.get("expansions"):
@@ -501,68 +543,107 @@ def cmd_ask(
             parts.append(f"lex{lex}")
         if vec:
             parts.append(f"vec{vec}")
-        print(f"(expansions: {' '.join(parts)})")
+        print(style(f"(expansions: {' '.join(parts)})", "muted"))
 
     if result["answer"] is None:
-        print("\nNo relevant documents found.")
+        if result.get("cost"):
+            cost = result["cost"]
+            known_tag = "" if cost.get("known", True) else " + unknown-price calls"
+            print(
+                style(
+                    f"(estimated cost: {format_usd(cost['estimated_total_usd'])}"
+                    f"{known_tag})",
+                    "muted",
+                )
+            )
+        print(style("\nNo relevant documents found.", "warning"))
         return
 
     if rerank_info:
         print(
-            f"(rerank: {rerank_info['rerank_ms']:.0f}ms, "
-            f"{rerank_info['prompt_tokens']}+{rerank_info['completion_tokens']} tokens, "
-            f"{rerank_info['input_count']} -> {rerank_info['output_count']})"
+            style(
+                f"(rerank: {rerank_info['rerank_ms']:.0f}ms, "
+                f"{rerank_info['prompt_tokens']}+"
+                f"{rerank_info['completion_tokens']} tokens, "
+                f"{rerank_info['input_count']} -> {rerank_info['output_count']})",
+                "muted",
+            )
         )
 
-    print(f"(model: {result['model']})")
+    print(style(f"(model: {result['model']})", "muted"))
     print(
-        f"(tokens: {result['tokens']['prompt']} in / {result['tokens']['completion']} out)"
+        style(
+            f"(tokens: {result['tokens']['prompt']} in / "
+            f"{result['tokens']['completion']} out)",
+            "muted",
+        )
     )
+    if result.get("cost"):
+        cost = result["cost"]
+        known_tag = "" if cost.get("known", True) else " + unknown-price calls"
+        print(
+            style(
+                f"(estimated cost: {format_usd(cost['estimated_total_usd'])}"
+                f"{known_tag})",
+                "muted",
+            )
+        )
     print(
-        f"(results: {result.get('result_count', '?')} retrieved, "
-        f"{result.get('filtered_count', '?')} above threshold)\n"
+        style(
+            f"(results: {result.get('result_count', '?')} retrieved, "
+            f"{result.get('filtered_count', '?')} above threshold)\n",
+            "muted",
+        )
     )
-    print(result["answer"])
-    print("\n--- Sources ---")
+    print(style(result["answer"], "answer"))
+    print(style("\n--- Sources ---", "heading"))
     for src in result["sources"]:
+        rank = style(f"[{src['rank']}]", "rank")
+        path = style(src["doc_path"], "path")
         if src["heading"]:
-            print(f"  [{src['rank']}] {src['doc_path']} > {src['heading']}")
+            heading = style(src["heading"], "heading")
+            print(f"  {rank} {path} > {heading}")
         else:
-            print(f"  [{src['rank']}] {src['doc_path']}")
+            print(f"  {rank} {path}")
 
 
 def cmd_similar(file_arg: str, cfg: Config, top_k: int = 10):
     try:
         result = similar_core(file_arg, cfg, top_k)
     except NoIndexError as e:
-        print(str(e))
+        print_error(str(e))
         sys.exit(1)
     except FileNotIndexedError as e:
-        print(str(e))
+        print_error(str(e))
         if "not in index" in str(e).lower():
-            print("Run 'kb index' to index it first.")
+            print(style("Run 'kb index' to index it first.", "muted"))
         sys.exit(1)
 
     if not result["results"]:
-        print(f"No similar documents found for {result['source']}.")
+        print(
+            style(
+                f"No similar documents found for {result['source']}.",
+                "warning",
+            )
+        )
         return
 
-    print(f"Documents similar to: {result['source']}\n")
+    print(label("Documents similar to", style(result["source"], "path")) + "\n")
     for r in result["results"]:
-        print(f"--- [{r['rank']}] {r['doc_path']} (sim:{r['similarity']:.3f}) ---")
+        print(result_header(r["rank"], r["doc_path"], f"sim:{r['similarity']:.3f}"))
         if r["title"]:
-            print(f"    {r['title']}")
+            print(f"    {style(r['title'], 'heading')}")
 
 
 def cmd_tag(cfg: Config, file_arg: str, new_tags: list[str]):
     if not cfg.db_path.exists():
-        print("No index found. Run 'kb index' first.")
+        print_error("No index found. Run 'kb index' first.")
         sys.exit(1)
 
     conn = connect(cfg)
     doc_path = _resolve_doc_path(cfg, conn, file_arg)
     if not doc_path:
-        print(f"File not in index: {file_arg}")
+        print_error(f"File not in index: {file_arg}")
         conn.close()
         sys.exit(1)
 
@@ -576,19 +657,19 @@ def cmd_tag(cfg: Config, file_arg: str, new_tags: list[str]):
         (",".join(sorted(existing)), doc_path),
     )
     conn.commit()
-    print(f"Tags for {doc_path}: {', '.join(sorted(existing))}")
+    print(label(f"Tags for {style(doc_path, 'path')}", ", ".join(sorted(existing))))
     conn.close()
 
 
 def cmd_untag(cfg: Config, file_arg: str, remove_tags: list[str]):
     if not cfg.db_path.exists():
-        print("No index found. Run 'kb index' first.")
+        print_error("No index found. Run 'kb index' first.")
         sys.exit(1)
 
     conn = connect(cfg)
     doc_path = _resolve_doc_path(cfg, conn, file_arg)
     if not doc_path:
-        print(f"File not in index: {file_arg}")
+        print_error(f"File not in index: {file_arg}")
         conn.close()
         sys.exit(1)
 
@@ -603,15 +684,15 @@ def cmd_untag(cfg: Config, file_arg: str, remove_tags: list[str]):
     )
     conn.commit()
     if existing:
-        print(f"Tags for {doc_path}: {', '.join(sorted(existing))}")
+        print(label(f"Tags for {style(doc_path, 'path')}", ", ".join(sorted(existing))))
     else:
-        print(f"All tags removed from {doc_path}")
+        print(style(f"All tags removed from {doc_path}", "success"))
     conn.close()
 
 
 def cmd_tags(cfg: Config):
     if not cfg.db_path.exists():
-        print("No index found. Run 'kb index' first.")
+        print_error("No index found. Run 'kb index' first.")
         sys.exit(1)
 
     conn = connect(cfg)
@@ -619,7 +700,7 @@ def cmd_tags(cfg: Config):
     conn.close()
 
     if not rows:
-        print("No tagged documents.")
+        print(style("No tagged documents.", "warning"))
         return
 
     counts: dict[str, int] = {}
@@ -629,34 +710,43 @@ def cmd_tags(cfg: Config):
             if tag:
                 counts[tag] = counts.get(tag, 0) + 1
 
-    print(f"{len(counts)} tags across {len(rows)} documents\n")
+    print(style(f"{len(counts)} tags across {len(rows)} documents\n", "heading"))
     for tag, count in sorted(counts.items()):
-        print(f"  {tag:<30} {count} doc{'s' if count != 1 else ''}")
+        print(
+            f"  {style(f'{tag:<30}', 'label')} "
+            f"{style(count, 'metric')} doc{'s' if count != 1 else ''}"
+        )
 
 
 def cmd_stats(cfg: Config):
     result = stats_core(cfg)
     if "error" in result:
-        print(result["error"])
+        print_error(result["error"])
         return
 
     db_size_kb = result["db_size_bytes"] / 1024
-    print(f"DB: {result['db_path']} ({db_size_kb:.1f} KB)")
-    print(f"Documents: {result['doc_count']}", end="")
+    print(label("DB", f"{style(result['db_path'], 'path')} ({db_size_kb:.1f} KB)"))
+    print(label("Documents", style(result["doc_count"], "metric")), end="")
     if result["type_counts"]:
         parts = [f"{cnt} {t}" for t, cnt in result["type_counts"].items()]
-        print(f" ({', '.join(parts)})", end="")
+        print(style(f" ({', '.join(parts)})", "muted"), end="")
     print()
     print(
-        f"Chunks: {result['chunk_count']} | Vectors: {result['vec_count']} "
-        f"| FTS entries: {result['fts_count']}"
+        style(
+            f"Chunks: {result['chunk_count']} | Vectors: {result['vec_count']} "
+            f"| FTS entries: {result['fts_count']}",
+            "metric",
+        )
     )
     print(
-        f"Total text: {result['total_chars']:,} chars "
-        f"(~{result['total_chars'] // 4:,} tokens)"
+        style(
+            f"Total text: {result['total_chars']:,} chars "
+            f"(~{result['total_chars'] // 4:,} tokens)",
+            "metric",
+        )
     )
 
-    print("\nCapabilities:")
+    print(style("\nCapabilities:", "heading"))
     print(
         f"  chonkie chunking:   "
         f"{'yes' if CHONKIE_AVAILABLE else 'no (pip install chonkie)'}"
@@ -672,19 +762,21 @@ def cmd_stats(cfg: Config):
     )
 
     exts = sorted(supported_extensions(include_code=cfg.index_code))
-    print(f"  Supported formats:  {', '.join(exts)}")
+    print(f"  {label('Supported formats', ', '.join(exts))}")
 
     missing = unavailable_formats()
     if missing:
         for ext, pkg in missing:
-            print(f"  {ext}: unavailable (pip install {pkg})")
+            print(f"  {style(ext + ':', 'warning')} unavailable (pip install {pkg})")
 
-    print("\nDocuments:")
+    print(style("\nDocuments:", "heading"))
     for doc in result["documents"]:
         h = doc["content_hash"][:8] if doc["content_hash"] else "n/a"
         type_tag = f" [{doc['type']}]" if doc["type"] != "markdown" else ""
         print(
-            f"  {doc['path']}: {doc['chunk_count']} chunks [{h}]{type_tag} ({doc['title']})"
+            f"  {style(doc['path'], 'path')}: "
+            f"{style(doc['chunk_count'], 'metric')} chunks "
+            f"{style(f'[{h}]{type_tag}', 'muted')} ({doc['title']})"
         )
 
 
@@ -699,16 +791,16 @@ def _format_size(size: int) -> str:
 def cmd_list(cfg: Config, full: bool = False):
     result = list_core(cfg)
     if "error" in result:
-        print(result["error"])
+        print_error(result["error"])
         return
 
     rows = result["documents"]
     if not rows:
-        print("No documents indexed.")
+        print(style("No documents indexed.", "warning"))
         return
 
     if full:
-        print(f"{len(rows)} documents indexed\n")
+        print(style(f"{len(rows)} documents indexed\n", "heading"))
         for r in rows:
             path = r["path"]
             doc_type = r["type"] or "unknown"
@@ -716,8 +808,10 @@ def cmd_list(cfg: Config, full: bool = False):
             size = r["size_bytes"]
             date = (r["indexed_at"] or "")[:10]
             print(
-                f"  {path:<50} {doc_type:<12} {chunks:>3} chunks  "
-                f"{_format_size(size):>10}  {date}"
+                f"  {style(f'{path:<50}', 'path')} {style(f'{doc_type:<12}', 'label')} "
+                f"{style(f'{chunks:>3}', 'metric')} chunks  "
+                f"{style(f'{_format_size(size):>10}', 'metric')}  "
+                f"{style(date, 'muted')}"
             )
         return
 
@@ -737,18 +831,26 @@ def cmd_list(cfg: Config, full: bool = False):
         type_stats[doc_type]["chunks"] += chunks
 
     print(
-        f"{len(rows)} documents indexed "
-        f"({_format_size(total_size)}, {total_chunks} chunks)\n"
+        style(
+            f"{len(rows)} documents indexed "
+            f"({_format_size(total_size)}, {total_chunks} chunks)\n",
+            "heading",
+        )
     )
     for doc_type in sorted(
         type_stats, key=lambda t: type_stats[t]["count"], reverse=True
     ):
         s = type_stats[doc_type]
+        count = s["count"]
+        chunks = s["chunks"]
+        size = _format_size(s["size"])
         print(
-            f"  {doc_type:<12} {s['count']:>4} docs  {s['chunks']:>5} chunks  "
-            f"{_format_size(s['size']):>10}"
+            f"  {style(f'{doc_type:<12}', 'label')} "
+            f"{style(f'{count:>4}', 'metric')} docs  "
+            f"{style(f'{chunks:>5}', 'metric')} chunks  "
+            f"{style(f'{size:>10}', 'metric')}"
         )
-    print("\nUse 'kb list --full' for per-file details.")
+    print(style("\nUse 'kb list --full' for per-file details.", "muted"))
 
 
 def cmd_feedback(args: list[str]):
@@ -756,21 +858,21 @@ def cmd_feedback(args: list[str]):
     if "--list" in args:
         result = list_feedback_core()
         if not result["entries"]:
-            print("No feedback entries.")
+            print(style("No feedback entries.", "warning"))
             return
-        print(f"{result['count']} feedback entries:\n")
+        print(style(f"{result['count']} feedback entries:\n", "heading"))
         for e in result["entries"]:
             sev = e.get("severity", "note")
             ts = e.get("timestamp", "?")
             msg = e.get("message", "")
-            print(f"  [{sev}] {ts}")
+            print(f"  {style(f'[{sev}]', 'rank')} {style(ts, 'muted')}")
             print(f"    {msg}")
             if e.get("tool"):
-                print(f"    tool: {e['tool']}")
+                print(f"    {label('tool', e['tool'])}")
             if e.get("agent_id"):
-                print(f"    agent: {e['agent_id']}")
+                print(f"    {label('agent', e['agent_id'])}")
             if e.get("error_trace"):
-                print(f"    trace: {e['error_trace']}")
+                print(f"    {label('trace', e['error_trace'])}")
             print()
         return
 
@@ -800,17 +902,17 @@ def cmd_feedback(args: list[str]):
             error_trace = args[i + 1]
             i += 2
         elif args[i].startswith("--"):
-            print(f"Unknown flag: {args[i]}")
+            print_error(f"Unknown flag: {args[i]}")
             sys.exit(1)
         elif not message:
             message = args[i]
             i += 1
         else:
-            print(f"Unexpected argument: {args[i]}")
+            print_error(f"Unexpected argument: {args[i]}")
             sys.exit(1)
 
     if not message:
-        print(
+        print_error(
             'Usage: kb feedback "message" [--tool T] [--severity bug|suggestion|note]'
         )
         sys.exit(1)
@@ -825,10 +927,12 @@ def cmd_feedback(args: list[str]):
             error_trace=error_trace,
         )
     except KBError as e:
-        print(str(e))
+        print_error(str(e))
         sys.exit(1)
 
-    print(f"Feedback recorded [{entry['severity']}]: {entry['message']}")
+    print(
+        style(f"Feedback recorded [{entry['severity']}]: {entry['message']}", "success")
+    )
 
 
 def cmd_completion(shell: str):

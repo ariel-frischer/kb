@@ -16,6 +16,7 @@ import warnings
 from openai import OpenAI
 
 from .config import Config
+from .cost import estimate_tokens, usage_tokens
 
 log = logging.getLogger(__name__)
 
@@ -155,7 +156,7 @@ def llm_hyde_passage(
                 {"role": "user", "content": query},
             ],
             temperature=0.7,
-            max_tokens=1024,
+            max_tokens=300,
         )
         passage = (resp.choices[0].message.content or "").strip()
         elapsed = (time.time() - t0) * 1000
@@ -169,6 +170,52 @@ def llm_hyde_passage(
         return None, elapsed
 
 
+def llm_hyde_passage_with_usage(
+    query: str, client: OpenAI, cfg: Config
+) -> tuple[str | None, float, dict | None]:
+    """Generate a HyDE passage and include token metadata when available."""
+    model = cfg.hyde_model or cfg.chat_model
+    hyde_cl = _hyde_client(client, cfg)
+    t0 = time.time()
+    try:
+        messages = [
+            {"role": "system", "content": _SYSTEM_PROMPT},
+            {"role": "user", "content": query},
+        ]
+        resp = hyde_cl.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=0.7,
+            max_tokens=300,
+        )
+        passage = (resp.choices[0].message.content or "").strip()
+        elapsed = (time.time() - t0) * 1000
+        if not passage:
+            log.warning("HyDE: empty response from %s", model)
+            return None, elapsed, None
+
+        prompt_tokens, completion_tokens = usage_tokens(getattr(resp, "usage", None))
+        estimated = False
+        if prompt_tokens is None or completion_tokens is None:
+            prompt_tokens = estimate_tokens(_SYSTEM_PROMPT) + estimate_tokens(query)
+            completion_tokens = estimate_tokens(passage)
+            estimated = True
+        return (
+            passage,
+            elapsed,
+            {
+                "model": model,
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "estimated_tokens": estimated,
+            },
+        )
+    except Exception:
+        elapsed = (time.time() - t0) * 1000
+        log.warning("HyDE: failed to generate passage", exc_info=True)
+        return None, elapsed, None
+
+
 def generate_hyde_passage(
     query: str, client: OpenAI | None, cfg: Config
 ) -> tuple[str | None, float]:
@@ -180,3 +227,13 @@ def generate_hyde_passage(
     if cfg.hyde_method == "local":
         return local_hyde_passage(query, cfg)
     return llm_hyde_passage(query, client, cfg)
+
+
+def generate_hyde_passage_with_usage(
+    query: str, client: OpenAI | None, cfg: Config
+) -> tuple[str | None, float, dict | None]:
+    """Generate a HyDE passage plus usage metadata for cost estimation."""
+    if cfg.hyde_method == "local":
+        passage, elapsed = local_hyde_passage(query, cfg)
+        return passage, elapsed, None
+    return llm_hyde_passage_with_usage(query, client, cfg)

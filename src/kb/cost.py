@@ -36,13 +36,17 @@ def usage_tokens(usage: Any) -> tuple[int | None, int | None]:
 
 
 def _price_for_model(model: str, prices: dict[str, Any]) -> Any | None:
-    for prefix, price in sorted(prices.items(), key=lambda item: len(item[0]), reverse=True):
+    for prefix, price in sorted(
+        prices.items(), key=lambda item: len(item[0]), reverse=True
+    ):
         if model == prefix or model.startswith(f"{prefix}-"):
             return price
     return None
 
 
-def chat_cost_usd(model: str, prompt_tokens: int, completion_tokens: int) -> float | None:
+def chat_cost_usd(
+    model: str, prompt_tokens: int, completion_tokens: int
+) -> float | None:
     price = _price_for_model(model, CHAT_PRICES_PER_1M)
     if not price:
         return None

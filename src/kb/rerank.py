@@ -124,9 +124,7 @@ def _get_cross_encoder(model_name: str):
         os.environ["HF_HUB_DISABLE_IMPLICIT_TOKEN"] = "1"
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore", message=".*unauthenticated.*")
-            _cross_encoder_cache[model_name] = CrossEncoder(
-                model_name, device=device
-            )
+            _cross_encoder_cache[model_name] = CrossEncoder(model_name, device=device)
         if _prev is None:
             os.environ.pop("HF_HUB_DISABLE_IMPLICIT_TOKEN", None)
         else:

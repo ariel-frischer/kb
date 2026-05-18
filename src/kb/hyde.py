@@ -68,9 +68,9 @@ def _get_local_model(model_name: str):
             warnings.filterwarnings("ignore", message=".*torch_dtype.*")
             warnings.filterwarnings("ignore", message=".*tie_word_embeddings.*")
             tokenizer = AutoTokenizer.from_pretrained(model_name)
-            model = AutoModelForCausalLM.from_pretrained(
-                model_name, dtype=dtype
-            ).to(device)
+            model = AutoModelForCausalLM.from_pretrained(model_name, dtype=dtype).to(
+                device
+            )
         if _prev_offline is None:
             os.environ.pop("HF_HUB_DISABLE_IMPLICIT_TOKEN", None)
         else:

@@ -10,7 +10,9 @@ def test_estimate_tokens_from_chars():
 
 
 def test_chat_cost_matches_default_model_rates():
-    cost = chat_cost_usd("gpt-4o-mini", prompt_tokens=1_000_000, completion_tokens=1_000_000)
+    cost = chat_cost_usd(
+        "gpt-4o-mini", prompt_tokens=1_000_000, completion_tokens=1_000_000
+    )
     assert cost == 0.75
 
 

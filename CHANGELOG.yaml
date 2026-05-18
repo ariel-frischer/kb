@@ -4,8 +4,14 @@ releases:
     added:
       - description: "HyDE LLM provider override — `hyde_base_url` and `hyde_api_key` config fields allow using a separate OpenAI-compatible provider for HyDE passage generation (e.g. Google Gemini free tier). API keys support `env:VAR_NAME` syntax for env var resolution"
         commits: []
+      - description: "`kb formats` command for supported document formats and unavailable optional extractors"
+        commits: []
     fixed: []
-    changed: []
+    changed:
+      - description: "`kb stats` now groups indexed documents by top-level path glob by default; use `kb stats --full` for per-file details"
+        commits: []
+      - description: "`kb stats` no longer prints supported document formats; use `kb formats` instead"
+        commits: []
     removed: []
     deprecated: []
     breaking: []

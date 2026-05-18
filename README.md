@@ -95,7 +95,8 @@ kb similar <file> [k]          Find similar documents (no API call, default k=10
 kb tag <file> tag1 [tag2...]   Add tags to a document
 kb untag <file> tag1 [tag2...]  Remove tags from a document
 kb tags                        List all tags with document counts
-kb stats                       Show index stats + capabilities
+kb stats [--full]              Show index stats (--full for per-file details)
+kb formats                     Show supported document formats
 kb reset                       Drop DB and start fresh
 kb version                     Show version (also: kb v, kb --version)
 kb mcp                         Start MCP server (for Claude Desktop / AI agents)
@@ -258,7 +259,7 @@ kb search 'tag:python basics'          # filter by tag in search
 
 **Code files (opt-in):** Set `index_code = true` in config to also index source code — `.py`, `.js`, `.ts`, `.go`, `.rs`, `.java`, `.c`, `.cpp`, and 60+ more extensions.
 
-Run `kb stats` to see which formats are available in your installation.
+Run `kb formats` to see which formats are available in your installation.
 
 ## How It Works
 

@@ -65,7 +65,8 @@ Usage:
   kb untag <file> tag1 [tag2...]  Remove tags from a document
   kb tags                        List all tags with document counts
   kb list [--full]                List indexed documents (summary; --full for details)
-  kb stats                       Show index statistics and supported formats
+  kb stats [--full]              Show index statistics
+  kb formats                     Show supported document formats
   kb reset                       Drop database and start fresh
   kb version                      Show version (also: kb v, kb --version)
   kb feedback "msg" [--tool T] [--severity bug|suggestion|note] [--context C] [--agent-id A] [--error-trace E]
@@ -718,7 +719,26 @@ def cmd_tags(cfg: Config):
         )
 
 
-def cmd_stats(cfg: Config):
+def _top_level_glob(path: str) -> str:
+    parts = Path(path).parts
+    if len(parts) <= 1:
+        return "./*"
+    return f"{parts[0]}/*"
+
+
+def _summarize_path_groups(documents: list[dict]) -> list[dict]:
+    groups: dict[str, dict] = {}
+    for doc in documents:
+        group = _top_level_glob(doc["path"])
+        if group not in groups:
+            groups[group] = {"path": group, "docs": 0, "chunks": 0}
+        groups[group]["docs"] += 1
+        groups[group]["chunks"] += doc["chunk_count"]
+
+    return sorted(groups.values(), key=lambda d: d["path"])
+
+
+def cmd_stats(cfg: Config, full: bool = False):
     result = stats_core(cfg)
     if "error" in result:
         print_error(result["error"])
@@ -761,22 +781,50 @@ def cmd_stats(cfg: Config):
         f"{'yes' if cfg.index_code else 'no (set index_code = true)'}"
     )
 
+    if full:
+        print(style("\nDocuments:", "heading"))
+        for doc in result["documents"]:
+            h = doc["content_hash"][:8] if doc["content_hash"] else "n/a"
+            type_tag = f" [{doc['type']}]" if doc["type"] != "markdown" else ""
+            print(
+                f"  {style(doc['path'], 'path')}: "
+                f"{style(doc['chunk_count'], 'metric')} chunks "
+                f"{style(f'[{h}]{type_tag}', 'muted')} ({doc['title']})"
+            )
+        return
+
+    print(style("\nPath groups:", "heading"))
+    for directory in _summarize_path_groups(result["documents"]):
+        dir_path = directory["path"]
+        doc_count = directory["docs"]
+        chunk_count = directory["chunks"]
+        docs_label = "doc" if directory["docs"] == 1 else "docs"
+        chunks_label = "chunk" if directory["chunks"] == 1 else "chunks"
+        print(
+            f"  {style(f'{dir_path:<50}', 'path')} "
+            f"{style(f'{doc_count:>4}', 'metric')} {docs_label}  "
+            f"{style(f'{chunk_count:>5}', 'metric')} {chunks_label}"
+        )
+    print(style("\nUse 'kb stats --full' for per-file details.", "muted"))
+
+
+def cmd_formats(cfg: Config):
     exts = sorted(supported_extensions(include_code=cfg.index_code))
-    print(f"  {label('Supported formats', ', '.join(exts))}")
+    print(style("Supported formats:", "heading"))
+    print(f"  {', '.join(exts)}")
 
     missing = unavailable_formats()
     if missing:
+        print(style("\nUnavailable optional formats:", "heading"))
         for ext, pkg in missing:
-            print(f"  {style(ext + ':', 'warning')} unavailable (pip install {pkg})")
+            print(f"  {style(ext + ':', 'warning')} install with {pkg}")
 
-    print(style("\nDocuments:", "heading"))
-    for doc in result["documents"]:
-        h = doc["content_hash"][:8] if doc["content_hash"] else "n/a"
-        type_tag = f" [{doc['type']}]" if doc["type"] != "markdown" else ""
+    if not cfg.index_code:
         print(
-            f"  {style(doc['path'], 'path')}: "
-            f"{style(doc['chunk_count'], 'metric')} chunks "
-            f"{style(f'[{h}]{type_tag}', 'muted')} ({doc['title']})"
+            style(
+                "\nCode files are disabled. Set index_code = true to include them.",
+                "muted",
+            )
         )
 
 
@@ -938,7 +986,7 @@ def cmd_feedback(args: list[str]):
 def cmd_completion(shell: str):
     subcommands = (
         "init add remove sources index allow search fts ask similar "
-        "tag untag tags stats reset list feedback version mcp completion"
+        "tag untag tags stats formats reset list feedback version mcp completion"
     )
 
     if shell == "zsh":
@@ -1214,9 +1262,14 @@ def main():
         cmd_list(cfg, full="--full" in args)
     elif cmd == "stats":
         if sub_help:
-            print("Usage: kb stats")
+            print("Usage: kb stats [--full]")
             sys.exit(0)
-        cmd_stats(cfg)
+        cmd_stats(cfg, full="--full" in args)
+    elif cmd == "formats":
+        if sub_help:
+            print("Usage: kb formats")
+            sys.exit(0)
+        cmd_formats(cfg)
     elif cmd == "reset":
         if sub_help:
             print("Usage: kb reset")

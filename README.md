@@ -95,7 +95,8 @@ kb similar <file> [k]          Find similar documents (no API call, default k=10
 kb tag <file> tag1 [tag2...]   Add tags to a document
 kb untag <file> tag1 [tag2...]  Remove tags from a document
 kb tags                        List all tags with document counts
-kb stats                       Show index stats + capabilities
+kb stats [--full]              Show index stats (--full for per-file details)
+kb formats                     Show supported document formats
 kb reset                       Drop DB and start fresh
 kb version                     Show version (also: kb v, kb --version)
 kb mcp                         Start MCP server (for Claude Desktop / AI agents)
@@ -151,6 +152,8 @@ sources = [
 # hyde_model = ""           # LLM for HyDE ("" = use chat_model)
 # hyde_method = "llm"      # "llm" (OpenAI API) or "local" (transformers, no API cost)
 # hyde_local_model = "Qwen/Qwen3-0.6B"  # HF model for local HyDE method
+# hyde_base_url = ""        # base URL for HyDE LLM ("" = use default OpenAI)
+# hyde_api_key = ""         # API key for HyDE LLM ("" = use default; supports "env:VAR_NAME")
 # query_expand = false     # generate keyword + semantic query expansions (also --expand flag)
 # expand_method = "local"  # "local" (FLAN-T5) or "llm" (OpenAI API)
 # expand_model = "google/flan-t5-small"  # model for local expand method
@@ -256,7 +259,7 @@ kb search 'tag:python basics'          # filter by tag in search
 
 **Code files (opt-in):** Set `index_code = true` in config to also index source code — `.py`, `.js`, `.ts`, `.go`, `.rs`, `.java`, `.c`, `.cpp`, and 60+ more extensions.
 
-Run `kb stats` to see which formats are available in your installation.
+Run `kb formats` to see which formats are available in your installation.
 
 ## How It Works
 

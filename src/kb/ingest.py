@@ -15,6 +15,7 @@ from .config import Config
 from .db import connect, fts_path
 from .embed import embed_batch, serialize_f32
 from .extract import extract_text, supported_extensions, unavailable_formats
+from .terminal import label, style
 
 
 def md5_hash(text: str) -> str:
@@ -30,7 +31,10 @@ def _load_ignore_patterns(dir_path: Path) -> list[str]:
                 line = line.strip()
                 if line and not line.startswith("#"):
                     patterns.append(line)
-            print(f"  Loaded {len(patterns)} ignore patterns from {kbignore}")
+            print(
+                f"  {style('Loaded', 'success')} {style(len(patterns), 'metric')} "
+                f"ignore patterns from {style(kbignore, 'path')}"
+            )
             break
     return patterns
 
@@ -193,7 +197,10 @@ def _index_file(
 
     new_count = len(chunks) - file_reused
     reuse_note = f" ({file_reused} reused)" if file_reused else ""
-    print(f"  {rel_path}: {len(chunks)} chunks, {new_count} new{reuse_note}")
+    print(
+        f"  {style(rel_path, 'path')}: {style(len(chunks), 'metric')} chunks, "
+        f"{style(new_count, 'metric')} new{style(reuse_note, 'muted')}"
+    )
 
     return True, file_reused
 
@@ -214,7 +221,10 @@ def index_directory(dir_path: Path, cfg: Config, *, no_size_limit: bool = False)
 
     ignored_count = len(all_files) - len(files)
     if ignored_count:
-        print(f"  Ignored {ignored_count} files via .kbignore")
+        print(
+            f"  {style('Ignored', 'warning')} {style(ignored_count, 'metric')} "
+            "files via .kbignore"
+        )
 
     # Count by extension for summary
     ext_counts: Counter[str] = Counter()
@@ -222,10 +232,10 @@ def index_directory(dir_path: Path, cfg: Config, *, no_size_limit: bool = False)
         ext_counts[f.suffix.lower()] += 1
 
     # Print discovery summary
-    print(f"Found {len(files)} files in {dir_path}")
+    print(f"Found {style(len(files), 'metric')} files in {style(dir_path, 'path')}")
     if ext_counts:
         parts = [f"{cnt} {ext}" for ext, cnt in ext_counts.most_common()]
-        print(f"  Types: {', '.join(parts)}")
+        print(f"  {label('Types', ', '.join(parts))}")
 
     # Warn about unavailable optional formats
     missing = unavailable_formats()
@@ -236,10 +246,14 @@ def index_directory(dir_path: Path, cfg: Config, *, no_size_limit: bool = False)
                 skip_counts[f.suffix.lower()] += 1
         for ext, pkg in missing:
             if ext in skip_counts:
-                print(f"  {skip_counts[ext]} {ext} files skipped (install {pkg})")
+                print(
+                    f"  {style(skip_counts[ext], 'metric')} "
+                    f"{style(ext, 'warning')} files skipped "
+                    f"{style(f'(install {pkg})', 'muted')}"
+                )
 
     if CHONKIE_AVAILABLE:
-        print("  (using chonkie for chunking)")
+        print(f"  {style('(using chonkie for chunking)', 'muted')}")
 
     start = time.time()
     skipped = 0
@@ -253,7 +267,8 @@ def index_directory(dir_path: Path, cfg: Config, *, no_size_limit: bool = False)
             rel = cfg.doc_path_for_db(file_path, dir_path)
             mb = file_path.stat().st_size / (1024 * 1024)
             print(
-                f"  SKIP (too large): {rel} ({mb:.1f} MB > {cfg.max_file_size_mb} MB)"
+                f"  {style('SKIP (too large):', 'warning')} {style(rel, 'path')} "
+                f"{style(f'({mb:.1f} MB > {cfg.max_file_size_mb} MB)', 'muted')}"
             )
             size_skipped += 1
             continue
@@ -263,7 +278,10 @@ def index_directory(dir_path: Path, cfg: Config, *, no_size_limit: bool = False)
         try:
             result = extract_text(file_path, include_code=cfg.index_code)
         except Exception as e:
-            print(f"  WARN: failed to extract {rel_path}: {e}")
+            print(
+                f"  {style('WARN:', 'warning')} failed to extract "
+                f"{style(rel_path, 'path')}: {e}"
+            )
             continue
 
         if result is None:
@@ -300,12 +318,17 @@ def index_directory(dir_path: Path, cfg: Config, *, no_size_limit: bool = False)
     if not to_embed and indexed == 0:
         elapsed = time.time() - start
         size_note = f", {size_skipped} too large" if size_skipped else ""
-        print(f"\nNo changes. ({skipped} files unchanged{size_note}, {elapsed:.1f}s)")
+        print(
+            style(
+                f"\nNo changes. ({skipped} files unchanged{size_note}, {elapsed:.1f}s)",
+                "warning",
+            )
+        )
         conn.close()
         return
 
     if to_embed:
-        print(f"\nEmbedding {len(to_embed)} chunks...")
+        print(style(f"\nEmbedding {len(to_embed)} chunks...", "heading"))
         batch_size = 100
         t0 = time.time()
 
@@ -322,19 +345,28 @@ def index_directory(dir_path: Path, cfg: Config, *, no_size_limit: bool = False)
                 )
 
             done = min(i + batch_size, len(to_embed))
-            print(f"  {done}/{len(to_embed)}")
+            print(f"  {style(f'{done}/{len(to_embed)}', 'metric')}")
 
-        print(f"  Embedding time: {time.time() - t0:.2f}s")
+        print(f"  {label('Embedding time', f'{time.time() - t0:.2f}s')}")
 
     conn.commit()
 
     total = conn.execute("SELECT COUNT(*) FROM chunks").fetchone()[0]
     elapsed = time.time() - start
-    print("\n--- Indexing complete ---")
+    print(style("\n--- Indexing complete ---", "heading"))
     size_note = f", {size_skipped} too large" if size_skipped else ""
-    print(f"Files: {indexed} indexed, {skipped} unchanged{size_note}")
-    print(f"Chunks: {len(to_embed)} embedded, {chunks_reused} reused, {total} total")
-    print(f"Time: {elapsed:.2f}s")
-    print(f"DB: {cfg.db_path} ({cfg.db_path.stat().st_size / 1024:.1f} KB)")
+    print(label("Files", f"{indexed} indexed, {skipped} unchanged{size_note}"))
+    print(
+        label(
+            "Chunks", f"{len(to_embed)} embedded, {chunks_reused} reused, {total} total"
+        )
+    )
+    print(label("Time", f"{elapsed:.2f}s"))
+    print(
+        label(
+            "DB",
+            f"{style(cfg.db_path, 'path')} ({cfg.db_path.stat().st_size / 1024:.1f} KB)",
+        )
+    )
 
     conn.close()

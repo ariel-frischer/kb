@@ -62,7 +62,7 @@ src/kb/
 - **sqlite-vec `vec0` with cosine distance** — stores embeddings + text in auxiliary columns, avoiding JOINs at search time. Uses `distance_metric=cosine` so `1 - distance` gives true cosine similarity
 - **Reciprocal Rank Fusion** — combines vector and keyword rankings without needing score normalization
 - **FTS5 field weighting** — `fts_path` (10x), `heading` (2x), `text` (1x) via BM25 rank config. `fts_path` stores last 2 path components to avoid IDF collapse from common prefixes; filepath matches strongly boost relevance
-- **HyDE best-of-two** — embeds both raw query and hypothetical passage in one batch, runs two vec queries, keeps whichever has better top-1 similarity. HyDE can only help, never hurt. Two methods: `"llm"` (OpenAI API) or `"local"` (causal LM via transformers, default Qwen/Qwen3-0.6B, no API cost). FTS still uses original query.
+- **HyDE best-of-two** — embeds both raw query and hypothetical passage in one batch, runs two vec queries, keeps whichever has better top-1 similarity. HyDE can only help, never hurt. Two methods: `"llm"` (OpenAI-compatible API) or `"local"` (causal LM via transformers, default Qwen/Qwen3-0.6B, no API cost). LLM method supports separate provider via `hyde_base_url`/`hyde_api_key` (e.g. Google Gemini). FTS still uses original query.
 - **Query expansion** — opt-in (`--expand`), generates keyword synonyms (`lex`) and semantic rephrasings (`vec`) via local FLAN-T5 or LLM, fused with primary results via multi-list weighted RRF
 - **Content-hash per chunk** — incremental indexing only re-embeds changed content
 - **Config walks up from cwd** — like `.gitignore`, so `kb` works from any subdirectory

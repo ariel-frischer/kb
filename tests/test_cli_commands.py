@@ -7,6 +7,7 @@ import pytest
 from kb.cli import (
     cmd_ask,
     cmd_completion,
+    cmd_formats,
     cmd_index,
     cmd_list,
     cmd_search,
@@ -65,6 +66,35 @@ def populated_db(tmp_path):
     return cfg
 
 
+@pytest.fixture
+def multi_doc_db(tmp_path):
+    """Config + DB with several documents across parent directories."""
+    cfg = Config(embed_dims=4)
+    cfg.scope = "project"
+    cfg.config_dir = tmp_path
+    cfg.config_path = tmp_path / ".kb.toml"
+    cfg.db_path = tmp_path / "kb.db"
+
+    conn = connect(cfg)
+
+    docs = [
+        ("docs/guide.md", "Guide", "markdown", 2),
+        ("docs/reference/api.md", "API", "markdown", 3),
+        ("notes/todo.txt", "Todo", "text", 1),
+    ]
+    for path, title, doc_type, chunks in docs:
+        conn.execute(
+            "INSERT INTO documents (path, title, type, size_bytes, content_hash, chunk_count) "
+            "VALUES (?, ?, ?, 100, ?, ?)",
+            (path, title, doc_type, f"hash-{path}", chunks),
+        )
+
+    conn.commit()
+    conn.close()
+
+    return cfg
+
+
 def _mock_openai_client(embed_dims=4):
     """Build a mock OpenAI client that handles embeddings and chat."""
     client = MagicMock()
@@ -97,14 +127,43 @@ class TestCmdStats:
         assert "Documents: 1" in out
         assert "Chunks: 2" in out
         assert "Vectors: 2" in out
+        assert "docs" in out
+
+    def test_summarizes_top_level_globs_by_default(self, multi_doc_db, capsys):
+        cmd_stats(multi_doc_db)
+        out = capsys.readouterr().out
+        assert "Path groups:" in out
+        assert "docs/*" in out
+        assert "notes/*" in out
+        assert "docs/reference" not in out
+        assert "docs/guide.md" not in out
+        assert "docs/reference/api.md" not in out
+        assert "notes/todo.txt" not in out
+        assert "kb stats --full" in out
+
+    def test_full_shows_per_document_details(self, multi_doc_db, capsys):
+        cmd_stats(multi_doc_db, full=True)
+        out = capsys.readouterr().out
+        assert "Documents:" in out
         assert "docs/guide.md" in out
+        assert "docs/reference/api.md" in out
+        assert "notes/todo.txt" in out
 
     def test_shows_capabilities(self, populated_db, capsys):
         cmd_stats(populated_db)
         out = capsys.readouterr().out
         assert "chonkie" in out
-        assert "PDF" in out or "pdf" in out.lower()
         assert "rerank" in out.lower()
+        assert "Supported formats" not in out
+
+
+class TestCmdFormats:
+    def test_shows_supported_formats(self, capsys):
+        cmd_formats(Config())
+        out = capsys.readouterr().out
+        assert "Supported formats" in out
+        assert ".md" in out
+        assert ".pdf" in out or "pdf" in out.lower()
 
 
 class TestCmdIndex:
@@ -166,6 +225,32 @@ class TestCmdSearch:
         assert "install" in out.lower()
         assert "Embed:" in out
         assert "Vec:" in out
+
+    def test_human_search_output_uses_color_when_forced(
+        self, populated_db, capsys, monkeypatch
+    ):
+        monkeypatch.delenv("NO_COLOR", raising=False)
+        monkeypatch.setenv("FORCE_COLOR", "1")
+        client = _mock_openai_client(embed_dims=4)
+        with patch("kb.api.OpenAI", return_value=client):
+            cmd_search("install", populated_db, top_k=5)
+
+        out = capsys.readouterr().out
+        assert "\x1b[" in out
+        assert "Query:" in out
+        assert '"install"' in out
+
+    def test_json_search_output_never_uses_color(
+        self, populated_db, capsys, monkeypatch
+    ):
+        monkeypatch.delenv("NO_COLOR", raising=False)
+        monkeypatch.setenv("FORCE_COLOR", "1")
+        client = _mock_openai_client(embed_dims=4)
+        with patch("kb.api.OpenAI", return_value=client):
+            cmd_search("install", populated_db, top_k=5, output_format="json")
+
+        out = capsys.readouterr().out
+        assert "\x1b[" not in out
 
     def test_search_with_filter(self, populated_db, capsys):
         client = _mock_openai_client(embed_dims=4)

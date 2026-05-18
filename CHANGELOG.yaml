@@ -1,9 +1,22 @@
 releases:
-  - version: "unreleased"
-    date: null
-    added: []
-    fixed: []
-    changed: []
+  - version: "1.3.0"
+    date: "2026-05-18"
+    summary: "Adds the `kb formats` command, improves `kb stats` output for larger indexes, and lets HyDE use a separate OpenAI-compatible provider. Also increases HyDE response budget and suppresses noisy Hugging Face Hub token warnings during local model loading."
+    added:
+      - description: "HyDE LLM provider override — `hyde_base_url` and `hyde_api_key` config fields allow using a separate OpenAI-compatible provider for HyDE passage generation (e.g. Google Gemini free tier). API keys support `env:VAR_NAME` syntax for env var resolution"
+        commits: []
+      - description: "`kb formats` command for supported document formats and unavailable optional extractors"
+        commits: []
+    fixed:
+      - description: "HyDE LLM generation now allows longer hypothetical passages by increasing `max_tokens` from 300 to 1024"
+        commits: ["cab26b7"]
+      - description: "Local model loading suppresses Hugging Face Hub implicit token warnings for cleaner CLI output"
+        commits: ["b4be588"]
+    changed:
+      - description: "`kb stats` now groups indexed documents by top-level path glob by default; use `kb stats --full` for per-file details"
+        commits: []
+      - description: "`kb stats` no longer prints supported document formats; use `kb formats` instead"
+        commits: []
     removed: []
     deprecated: []
     breaking: []

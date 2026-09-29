@@ -9,7 +9,7 @@ CLI RAG tool for your docs. Index 30+ document formats (markdown, PDF, DOCX, EPU
 
 - **Hybrid search** — vector similarity + FTS5 keyword search, fused with Reciprocal Rank Fusion (with rank bonuses)
 - **HyDE best-of-two** — generates a hypothetical answer passage, embeds both it and the raw query, keeps whichever vec result set is better (local via transformers or LLM API; enabled by default, can only help never hurt)
-- **Keyword-only search** — `kb fts` for instant BM25 results with zero API cost (truncated filepath matches weighted 10x, headings 2x)
+- **Keyword-only search** — `kb fts` for instant BM25 results with zero API cost (match-any terms ranked by BM25, stopwords skipped; truncated filepath matches weighted 10x, headings 2x)
 - **Heading-aware chunking** — markdown split by heading hierarchy, each chunk carries ancestry
 - **Incremental indexing** — content-hash per chunk, only re-embeds changes
 - **Query expansion** — generates keyword synonyms (for FTS) and semantic rephrasings (for vector search) via local FLAN-T5 or LLM, fuses all result lists with multi-list weighted RRF (`--expand`)
@@ -21,6 +21,8 @@ CLI RAG tool for your docs. Index 30+ document formats (markdown, PDF, DOCX, EPU
 - **Optional code indexing** — set `index_code = true` to also index source code files (.py, .js, .ts, .go, .rs, etc.)
 - **Local or API embeddings** — local via `ibm-granite/granite-embedding-english-r2` (sentence-transformers, no API cost, fully offline, auto-detected dims) or OpenAI API — config-driven switch
 - **Pluggable chunking** — uses [chonkie](https://github.com/bhavnicksm/chonkie) when available, regex fallback otherwise
+- **Built-in benchmarks** — `kb eval` scores retrieval on public BEIR datasets with a hard API spend cap
+- **ChatGPT subscription support** — `llm_provider = "chatgpt"` runs LLM steps on your ChatGPT plan via the Codex login, no API key
 - **MCP server** — expose kb as tools for Claude Desktop, Claude Code, and other MCP clients
 
 ## Install
@@ -121,6 +123,13 @@ kb eval scifact --budget 2               # override the spend cap for this run
 - **Metrics** @10: nDCG (graded), Recall, MRR, Precision, plus p50 latency and USD spent per mode.
 - **Isolation**: corpora, eval indexes, run reports, and the spend ledger live under `~/.local/share/kb/eval/`. Your own index is never read or written. Eval indexes are keyed by embedding model and chunk settings, so reruns reuse them for free.
 - **Spend cap**: API spend across all eval runs is tracked in `~/.local/share/kb/eval/spend.json` and capped by `eval_budget_usd` (default `10.0`; `--budget` overrides per run). A run is refused up front when its estimated cost (uncached corpus embeddings + per-query HyDE/expansion/rerank) exceeds the remaining budget, stops early with a partial report if actual spend approaches the cap, and is refused outright if an API model has no known price. Local methods (`embed_method = "local"`, `hyde_method = "local"`, `expand_method = "local"`, `rerank_method = "cross-encoder"`) cost $0, and so do LLM calls with `llm_provider = "chatgpt"` (their tokens are reported).
+
+Reference results on SciFact (all 300 test queries, local `granite-embedding-english-r2`, no LLM steps, $0):
+
+| mode | nDCG@10 | Recall@10 | MRR@10 |
+|---|---|---|---|
+| `fts` | 0.697 | 0.816 | 0.663 |
+| `hybrid` | 0.759 | 0.897 | 0.721 |
 
 ### Shell completions
 
@@ -321,7 +330,7 @@ kb search "query"
 
 kb fts "query"
   1. Parse filters, strip from query
-  2. FTS5 keyword search (no embedding, weighted BM25: truncated filepath 10x, heading 2x)
+  2. FTS5 keyword search: stopwords dropped, remaining terms OR-matched with prefixes (no embedding, weighted BM25: truncated filepath 10x, heading 2x)
   3. Normalize BM25 scores
   4. Apply filters
   5. Display results (instant, zero API cost)

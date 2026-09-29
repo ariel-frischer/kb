@@ -6,14 +6,27 @@ import sqlite3
 from .config import Config
 
 
+# Common English words that add noise (and slow prefix expansion) to OR queries.
+_FTS_STOPWORDS = frozenset(
+    "a an and are as at be by can do does for from has have how i in is it its "
+    "of on or that the this to was what when where which who why will with".split()
+)
+
+
 def fts_escape(query: str) -> str | None:
-    """Convert plain text to FTS5 AND query with prefix matching."""
+    """Convert plain text to an FTS5 OR query with prefix matching.
+
+    OR lets BM25 rank partial matches instead of dropping every chunk that misses
+    one query word; stopwords and 1-char tokens are skipped unless nothing else remains.
+    """
     words = re.findall(r"\w+", query)
     if not words:
         return None
-    if len(words) == 1:
-        return f'"{words[0]}"*'
-    return " AND ".join(f'"{w}"*' for w in words)
+    kept = [w for w in words if len(w) > 1 and w.lower() not in _FTS_STOPWORDS]
+    terms: dict[str, str] = {}
+    for w in kept or words:
+        terms.setdefault(w.lower(), w)
+    return " OR ".join(f'"{w}"*' for w in terms.values())
 
 
 def _rank_bonus(rank: int) -> float:

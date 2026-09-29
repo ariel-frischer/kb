@@ -36,13 +36,19 @@ class TestFtsEscape:
     def test_single_word(self):
         assert fts_escape("hello") == '"hello"*'
 
-    def test_multiple_words(self):
+    def test_multiple_words_match_any(self):
         result = fts_escape("hello world")
-        assert result == '"hello"* AND "world"*'
+        assert result == '"hello"* OR "world"*'
 
-    def test_strips_punctuation(self):
+    def test_drops_stopwords_and_single_chars(self):
         result = fts_escape("what's the cost?")
-        assert result == '"what"* AND "s"* AND "the"* AND "cost"*'
+        assert result == '"cost"*'
+
+    def test_keeps_stopwords_when_nothing_else_remains(self):
+        assert fts_escape("the a") == '"the"* OR "a"*'
+
+    def test_dedupes_terms(self):
+        assert fts_escape("cache Cache cache api") == '"cache"* OR "api"*'
 
     def test_empty_string(self):
         assert fts_escape("") is None

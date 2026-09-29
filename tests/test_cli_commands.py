@@ -410,6 +410,7 @@ def _eval_report(**overrides):
             "ledger_total_usd": 1.25,
             "remaining_usd": 8.75,
             "ledger_path": "/tmp/eval/spend.json",
+            "llm_tokens": {"prompt": 0, "completion": 0},
         },
         "index": {"db_path": "/tmp/eval/indexes/scifact-x/kb.db", "fingerprint": "x"},
         "config": {
@@ -419,6 +420,7 @@ def _eval_report(**overrides):
             "query_expand": "off",
             "rerank_method": "n/a",
             "chat_model": "gpt-4o-mini",
+            "llm_provider": "openai",
         },
         "report_path": "/tmp/eval/runs/x.json",
     }

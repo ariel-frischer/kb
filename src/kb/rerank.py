@@ -8,6 +8,8 @@ import warnings
 from openai import OpenAI
 
 from .config import Config
+from .cost import estimate_tokens
+from .llm import complete
 
 # Lazy-loaded cross-encoder model cache
 _cross_encoder_cache: dict[str, object] = {}
@@ -34,7 +36,7 @@ def rerank(
 
 
 def llm_rerank(
-    client: OpenAI,
+    client: OpenAI | None,
     question: str,
     results: list[dict],
     cfg: Config,
@@ -55,22 +57,22 @@ def llm_rerank(
 
     passages_text = "\n\n".join(passages)
 
+    user = f"Question: {question}\n\nPassages:\n{passages_text}\n\nRanking:"
     t0 = time.time()
-    resp = client.chat.completions.create(
+    ranking_text, prompt_tokens, completion_tokens = complete(
+        cfg,
+        client,
         model=cfg.chat_model,
-        messages=[
-            {"role": "system", "content": RERANK_SYSTEM_PROMPT},
-            {
-                "role": "user",
-                "content": f"Question: {question}\n\nPassages:\n{passages_text}\n\nRanking:",
-            },
-        ],
+        system=RERANK_SYSTEM_PROMPT,
+        user=user,
         temperature=0,
         max_tokens=RERANK_MAX_TOKENS,
     )
-    ranking_text = resp.choices[0].message.content.strip()
+    ranking_text = ranking_text.strip()
     rerank_ms = (time.time() - t0) * 1000
-    tokens = resp.usage
+    if prompt_tokens is None or completion_tokens is None:
+        prompt_tokens = estimate_tokens(RERANK_SYSTEM_PROMPT) + estimate_tokens(user)
+        completion_tokens = estimate_tokens(ranking_text)
 
     ranked_indices = []
     for num_str in re.findall(r"\d+", ranking_text):
@@ -87,8 +89,10 @@ def llm_rerank(
 
     rerank_info = {
         "rerank_ms": rerank_ms,
-        "prompt_tokens": tokens.prompt_tokens,
-        "completion_tokens": tokens.completion_tokens,
+        "model": cfg.chat_model,
+        "provider": cfg.llm_provider,
+        "prompt_tokens": prompt_tokens,
+        "completion_tokens": completion_tokens,
         "input_count": len(results),
         "output_count": len(reranked),
     }

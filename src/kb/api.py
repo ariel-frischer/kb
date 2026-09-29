@@ -14,7 +14,6 @@ from .cost import (
     cost_summary,
     embed_cost_usd,
     estimate_tokens,
-    usage_tokens,
 )
 from .db import connect
 from .embed import deserialize_f32, embed_batch, serialize_f32
@@ -27,6 +26,7 @@ from .filters import (
     remove_tag_filter,
 )
 from .hyde import generate_hyde_passage_with_usage
+from .llm import complete, openai_client_needed
 from .rerank import rerank
 from .search import (
     fill_fts_only_results,
@@ -111,14 +111,16 @@ def _chat_cost_item(
     prompt_tokens: int,
     completion_tokens: int,
     estimated_tokens: bool = False,
+    provider: str = "openai",
 ) -> dict:
     return {
         "name": name,
         "model": model,
+        "provider": provider,
         "prompt_tokens": prompt_tokens,
         "completion_tokens": completion_tokens,
         "estimated_tokens": estimated_tokens,
-        "usd": chat_cost_usd(model, prompt_tokens, completion_tokens),
+        "usd": chat_cost_usd(model, prompt_tokens, completion_tokens, provider),
     }
 
 
@@ -206,7 +208,7 @@ def search_core(
     _require_index(cfg)
 
     conn = connect(cfg)
-    client = OpenAI()
+    client = OpenAI() if openai_client_needed(cfg) else None
 
     clean_query, filters = parse_filters(query)
     has_filters = has_active_filters(filters)
@@ -497,7 +499,7 @@ def ask_core(
     _require_index(cfg)
 
     conn = connect(cfg)
-    client = OpenAI()
+    client = OpenAI() if openai_client_needed(cfg) else None
 
     clean_question, filters = parse_filters(question)
     has_filters = has_active_filters(filters)
@@ -577,15 +579,7 @@ def ask_core(
                 clean_question, client, cfg
             )
             if hyde_usage:
-                cost_items.append(
-                    _chat_cost_item(
-                        name="hyde",
-                        model=hyde_usage["model"],
-                        prompt_tokens=hyde_usage["prompt_tokens"],
-                        completion_tokens=hyde_usage["completion_tokens"],
-                        estimated_tokens=hyde_usage["estimated_tokens"],
-                    )
-                )
+                cost_items.append(_chat_cost_item(name="hyde", **hyde_usage))
 
         retrieve_k = max(cfg.rerank_fetch_k, top_k * 3)
 
@@ -721,7 +715,8 @@ def ask_core(
                 cost_items.append(
                     _chat_cost_item(
                         name="rerank",
-                        model=cfg.chat_model,
+                        model=rerank_info["model"],
+                        provider=rerank_info["provider"],
                         prompt_tokens=rerank_info["prompt_tokens"],
                         completion_tokens=rerank_info["completion_tokens"],
                     )
@@ -790,36 +785,25 @@ def ask_core(
 
     context = "\n\n".join(context_parts)
 
+    answer_system = (
+        "You answer questions based on the provided context from a personal knowledge base. "
+        "Be direct and concise. If the context doesn't contain enough information, say so. "
+        "Cite sources by their number [1], [2], etc. when referencing specific information."
+    )
+    answer_user = f"Context:\n{context}\n\n---\nQuestion: {clean_question}"
     t0 = time.time()
-    chat_resp = client.chat.completions.create(
+    answer, prompt_tokens, completion_tokens = complete(
+        cfg,
+        client,
         model=cfg.chat_model,
-        messages=[
-            {
-                "role": "system",
-                "content": (
-                    "You answer questions based on the provided context from a personal knowledge base. "
-                    "Be direct and concise. If the context doesn't contain enough information, say so. "
-                    "Cite sources by their number [1], [2], etc. when referencing specific information."
-                ),
-            },
-            {
-                "role": "user",
-                "content": f"Context:\n{context}\n\n---\nQuestion: {clean_question}",
-            },
-        ],
+        system=answer_system,
+        user=answer_user,
         temperature=0.3,
         max_tokens=1000,
     )
-    answer = chat_resp.choices[0].message.content
     gen_ms = (time.time() - t0) * 1000
-    tokens = chat_resp.usage
-    prompt_tokens, completion_tokens = usage_tokens(tokens)
     if prompt_tokens is None or completion_tokens is None:
-        prompt_tokens = estimate_tokens(
-            "You answer questions based on the provided context from a personal knowledge base. "
-            "Be direct and concise. If the context doesn't contain enough information, say so. "
-            "Cite sources by their number [1], [2], etc. when referencing specific information."
-        ) + estimate_tokens(f"Context:\n{context}\n\n---\nQuestion: {clean_question}")
+        prompt_tokens = estimate_tokens(answer_system) + estimate_tokens(answer_user)
         completion_tokens = estimate_tokens(answer or "")
         answer_tokens_estimated = True
     else:
@@ -828,6 +812,7 @@ def ask_core(
         _chat_cost_item(
             name="answer",
             model=cfg.chat_model,
+            provider=cfg.llm_provider,
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
             estimated_tokens=answer_tokens_estimated,

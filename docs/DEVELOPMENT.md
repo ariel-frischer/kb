@@ -45,6 +45,7 @@ src/kb/
 ├── rerank.py      — Reranking: local cross-encoder (sentence-transformers) or LLM (RankGPT)
 ├── filters.py     — Pre-search filter parsing + application (file:, type:, tag:, dt>, dt<, +"kw", -"kw")
 ├── cost.py        — API price table + token/cost estimation helpers
+├── llm.py         — Chat completion helper: OpenAI API key (chat.completions) or ChatGPT subscription (Codex OAuth, Responses API)
 ├── eval.py        — `kb eval`: BEIR download/cache, isolated eval index, metrics, spend ledger + budget guard
 └── ingest.py      — File indexing pipeline (unified loop over all supported formats, frontmatter tag parsing)
 ```

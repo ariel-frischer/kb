@@ -41,6 +41,7 @@ from .extract import extract_text
 from .hyde import _SYSTEM_PROMPT as HYDE_SYSTEM_PROMPT
 from .hyde import HYDE_MAX_TOKENS
 from .ingest import index_directory, md5_hash
+from .llm import CHATGPT, hyde_provider, load_chatgpt_credentials
 from .rerank import (
     RERANK_MAX_TOKENS,
     RERANK_PASSAGE_CHARS,
@@ -492,6 +493,8 @@ class ApiUsage:
     hyde: bool
     expand: bool
     rerank: bool
+    # LLM steps billed to the ChatGPT subscription ($0, but need Codex credentials).
+    subscription: bool = False
 
     @property
     def any(self) -> bool:
@@ -500,12 +503,19 @@ class ApiUsage:
 
 def api_usage(cfg: Config, modes: Iterable[str]) -> ApiUsage:
     vector = bool(VECTOR_MODES & set(modes))
+    hyde_llm = vector and cfg.hyde_enabled and cfg.hyde_method != "local"
+    expand_llm = vector and cfg.query_expand and cfg.expand_method == "llm"
+    rerank_llm = "rerank" in modes and cfg.rerank_method != "cross-encoder"
+    hyde_paid = hyde_provider(cfg) != CHATGPT
+    chat_paid = cfg.llm_provider != CHATGPT
     return ApiUsage(
         # Indexing always embeds the corpus, even for fts-only runs.
         embed=cfg.embed_method != "local",
-        hyde=vector and cfg.hyde_enabled and cfg.hyde_method != "local",
-        expand=vector and cfg.query_expand and cfg.expand_method == "llm",
-        rerank="rerank" in modes and cfg.rerank_method != "cross-encoder",
+        hyde=hyde_llm and hyde_paid,
+        expand=expand_llm and chat_paid,
+        rerank=rerank_llm and chat_paid,
+        subscription=(hyde_llm and not hyde_paid)
+        or ((expand_llm or rerank_llm) and not chat_paid),
     )
 
 
@@ -582,6 +592,13 @@ def parse_modes(modes: Iterable[str] | str | None) -> list[str]:
     return list(dict.fromkeys(selected))
 
 
+def _add_llm_tokens(totals: dict[str, int], items: Iterable[dict]) -> None:
+    for item in items:
+        if "prompt_tokens" in item:
+            totals["prompt"] += item["prompt_tokens"]
+            totals["completion"] += item["completion_tokens"]
+
+
 def _rerank_all(
     client: OpenAI | None, question: str, candidates: list[dict], cfg: Config
 ) -> tuple[list[dict], dict]:
@@ -610,6 +627,7 @@ def _config_summary(cfg: Config, modes: list[str]) -> dict:
         else "n/a",
         "rerank_method": cfg.rerank_method if "rerank" in modes else "n/a",
         "chat_model": cfg.chat_model,
+        "llm_provider": cfg.llm_provider,
     }
 
 
@@ -635,6 +653,9 @@ def run_eval(
         raise EvalError("--limit must be >= 1.")
 
     usage = api_usage(cfg, mode_list)
+    if usage.subscription:
+        # Fail before any download/indexing if the Codex login is missing/expired.
+        load_chatgpt_credentials()
     unpriced = unpriced_models(cfg, usage)
     if unpriced:
         raise EvalBudgetError(
@@ -720,6 +741,7 @@ def run_eval(
     mode_usd: dict[str, float] = {m: 0.0 for m in mode_list}
     budget_exhausted = False
     largest_query_usd = 0.0
+    llm_tokens = {"prompt": 0, "completion": 0}
 
     _notify(progress, f"Evaluating {len(query_ids)} queries: {', '.join(mode_list)}")
     for n, qid in enumerate(query_ids, 1):
@@ -750,9 +772,11 @@ def run_eval(
                 t0 = time.perf_counter()
                 result = search_core(text, ecfg, top_k=fetch_k)
                 search_ms = (time.perf_counter() - t0) * 1000
-                search_usd = result.get("cost", {}).get("estimated_total_usd", 0.0)
+                search_cost = result.get("cost", {})
+                search_usd = search_cost.get("estimated_total_usd", 0.0)
                 mode_usd[search_bucket] += search_usd
                 query_usd += search_usd
+                _add_llm_tokens(llm_tokens, search_cost.get("items", []))
                 candidates = result["results"]
                 if "hybrid" in mode_list:
                     latencies["hybrid"].append(search_ms)
@@ -766,6 +790,8 @@ def run_eval(
                         rerank_client, text, candidates[: ecfg.rerank_fetch_k], ecfg
                     )
                     rerank_ms = (time.perf_counter() - t0) * 1000
+                    if "prompt_tokens" in info:
+                        _add_llm_tokens(llm_tokens, [info])
                     if usage.rerank and "prompt_tokens" in info:
                         rerank_usd = chat_cost_usd(
                             ecfg.chat_model,
@@ -814,6 +840,8 @@ def run_eval(
             "ledger_total_usd": round(ledger_total, 6),
             "remaining_usd": round(budget_usd - ledger_total, 6),
             "ledger_path": str(ledger.path),
+            # LLM tokens across modes, including $0 ChatGPT-subscription calls.
+            "llm_tokens": llm_tokens,
         },
         "index": {"db_path": str(ecfg.db_path), "fingerprint": index_fingerprint(cfg)},
         "config": _config_summary(cfg, mode_list),

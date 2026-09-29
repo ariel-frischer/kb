@@ -14,7 +14,8 @@ import warnings
 from openai import OpenAI
 
 from .config import Config
-from .cost import estimate_tokens, usage_tokens
+from .cost import estimate_tokens
+from .llm import complete
 
 log = logging.getLogger(__name__)
 
@@ -32,7 +33,9 @@ Query: "{query}"\
 EXPAND_MAX_TOKENS = 200
 
 
-def expand_query(client: OpenAI, query: str, cfg: Config) -> tuple[list[dict], float]:
+def expand_query(
+    client: OpenAI | None, query: str, cfg: Config
+) -> tuple[list[dict], float]:
     """Dispatch to configured method. Returns ([{"type": "lex"|"vec", "text": "..."}], elapsed_ms)."""
     t0 = time.time()
     if cfg.expand_method == "llm":
@@ -44,7 +47,7 @@ def expand_query(client: OpenAI, query: str, cfg: Config) -> tuple[list[dict], f
 
 
 def expand_query_with_usage(
-    client: OpenAI, query: str, cfg: Config
+    client: OpenAI | None, query: str, cfg: Config
 ) -> tuple[list[dict], float, dict | None]:
     """Like expand_query, plus LLM token usage metadata (None for local expansion)."""
     t0 = time.time()
@@ -57,32 +60,36 @@ def expand_query_with_usage(
     return result, elapsed, usage
 
 
-def llm_expand(client: OpenAI, query: str, cfg: Config) -> list[dict]:
-    """OpenAI API expansion with JSON mode."""
+def llm_expand(client: OpenAI | None, query: str, cfg: Config) -> list[dict]:
+    """LLM expansion with JSON mode."""
     return llm_expand_with_usage(client, query, cfg)[0]
 
 
 def llm_expand_with_usage(
-    client: OpenAI, query: str, cfg: Config
+    client: OpenAI | None, query: str, cfg: Config
 ) -> tuple[list[dict], dict | None]:
-    """OpenAI API expansion plus token usage (None when the request failed)."""
+    """LLM expansion plus token usage (None when the request failed)."""
+    from .api import KBError  # api imports expand; import lazily to avoid a cycle
+
     prompt = _LLM_PROMPT.format(query=query)
     try:
-        resp = client.chat.completions.create(
+        text, prompt_tokens, completion_tokens = complete(
+            cfg,
+            client,
             model=cfg.chat_model,
-            messages=[
-                {"role": "user", "content": prompt},
-            ],
-            response_format={"type": "json_object"},
+            system="",
+            user=prompt,
             temperature=0.7,
             max_tokens=EXPAND_MAX_TOKENS,
+            json_mode=True,
         )
-        text = (resp.choices[0].message.content or "").strip()
+        text = text.strip()
+    except KBError:
+        raise
     except Exception:
         log.warning("Query expansion (LLM) failed", exc_info=True)
         return [], None
 
-    prompt_tokens, completion_tokens = usage_tokens(getattr(resp, "usage", None))
     estimated = False
     if prompt_tokens is None or completion_tokens is None:
         prompt_tokens = estimate_tokens(prompt)
@@ -90,6 +97,7 @@ def llm_expand_with_usage(
         estimated = True
     usage = {
         "model": cfg.chat_model,
+        "provider": cfg.llm_provider,
         "prompt_tokens": prompt_tokens,
         "completion_tokens": completion_tokens,
         "estimated_tokens": estimated,

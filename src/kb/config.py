@@ -34,6 +34,8 @@ sources = [
 
 # LLM
 # chat_model = "gpt-4o-mini"
+# llm_provider = "openai"            # "openai" (API key) or "chatgpt" (ChatGPT subscription via `codex login`)
+# llm_reasoning_effort = "low"       # reasoning effort for llm_provider = "chatgpt"
 
 # Chunking
 # max_chunk_chars = 2000
@@ -94,6 +96,8 @@ sources = [
 
 # LLM
 # chat_model = "gpt-4o-mini"
+# llm_provider = "openai"            # "openai" (API key) or "chatgpt" (ChatGPT subscription via `codex login`)
+# llm_reasoning_effort = "low"       # reasoning effort for llm_provider = "chatgpt"
 
 # HyDE (Hypothetical Document Embeddings)
 # hyde_enabled = true                # generate hypothetical passage before vector search
@@ -137,6 +141,8 @@ class Config:
     embed_dims: int = 1536
     local_embed_model: str = "ibm-granite/granite-embedding-english-r2"
     chat_model: str = "gpt-4o-mini"
+    llm_provider: str = "openai"  # "openai" (API key) or "chatgpt" (Codex OAuth)
+    llm_reasoning_effort: str = "low"  # reasoning effort for the chatgpt provider
     max_chunk_chars: int = 2000
     min_chunk_chars: int = 50
     search_threshold: float = 0.001

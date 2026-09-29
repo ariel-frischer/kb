@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 import kb.eval as kb_eval
+from kb.api import KBError
 from kb.config import Config
 from kb.eval import (
     EvalBudgetError,
@@ -366,6 +367,49 @@ class TestBudget:
             kb_eval.estimate_query_cost_usd("q", user_cfg, usage, ["hybrid", "rerank"])
             == 0.0
         )
+
+    def test_chatgpt_llm_steps_are_free_not_unpriced(self, user_cfg):
+        user_cfg.embed_method = "local"
+        user_cfg.llm_provider = "chatgpt"
+        user_cfg.hyde_enabled = True
+        user_cfg.chat_model = "gpt-6-luna"  # no API price
+        user_cfg.hyde_method = "llm"
+        user_cfg.query_expand = True
+        user_cfg.expand_method = "llm"
+        user_cfg.rerank_method = "llm"
+        modes = ["fts", "hybrid", "rerank"]
+        usage = kb_eval.api_usage(user_cfg, modes)
+        assert usage.subscription
+        assert not usage.any
+        assert kb_eval.unpriced_models(user_cfg, usage) == []
+        assert kb_eval.estimate_query_cost_usd("q", user_cfg, usage, modes) == 0.0
+
+    def test_hyde_base_url_is_still_priced_under_chatgpt(
+        self, eval_home, user_cfg, monkeypatch
+    ):
+        monkeypatch.setattr(
+            kb_eval, "_download", MagicMock(side_effect=AssertionError("downloaded"))
+        )
+        user_cfg.embed_method = "local"
+        user_cfg.llm_provider = "chatgpt"
+        user_cfg.hyde_enabled = True
+        user_cfg.hyde_base_url = "http://localhost:11434/v1"
+        user_cfg.hyde_model = "llama3"
+        with pytest.raises(EvalBudgetError, match="hyde model=llama3"):
+            run_eval("scifact", user_cfg, modes="hybrid")
+
+    def test_chatgpt_run_without_codex_login_refused_before_download(
+        self, eval_home, user_cfg, tmp_path, monkeypatch
+    ):
+        monkeypatch.setenv("CODEX_HOME", str(tmp_path / "no-codex"))
+        monkeypatch.setattr(
+            kb_eval, "_download", MagicMock(side_effect=AssertionError("downloaded"))
+        )
+        user_cfg.embed_method = "local"
+        user_cfg.llm_provider = "chatgpt"
+        user_cfg.hyde_enabled = True
+        with pytest.raises(KBError, match="codex login"):
+            run_eval("scifact", user_cfg, modes="hybrid")
 
     def test_mid_run_stop_reports_partial_and_stays_under_budget(
         self, installed_dataset, eval_home, user_cfg, monkeypatch

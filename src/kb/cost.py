@@ -45,8 +45,14 @@ def _price_for_model(model: str, prices: dict[str, Any]) -> Any | None:
 
 
 def chat_cost_usd(
-    model: str, prompt_tokens: int, completion_tokens: int
+    model: str, prompt_tokens: int, completion_tokens: int, provider: str = "openai"
 ) -> float | None:
+    """USD for a chat call; None when the model is unpriced.
+
+    The "chatgpt" provider bills a ChatGPT subscription, not per token, so it is $0.
+    """
+    if provider == "chatgpt":
+        return 0.0
     price = _price_for_model(model, CHAT_PRICES_PER_1M)
     if not price:
         return None

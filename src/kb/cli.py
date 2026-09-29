@@ -1023,6 +1023,16 @@ def cmd_eval(cfg: Config, args: list[str]):
             f"remaining {format_usd(max(spend['remaining_usd'], 0.0))}",
         )
     )
+    tokens = spend["llm_tokens"]
+    if tokens["prompt"] or tokens["completion"]:
+        provider = result["config"]["llm_provider"]
+        note = " (ChatGPT subscription, $0)" if provider == "chatgpt" else ""
+        print(
+            label(
+                "LLM tokens",
+                f"{tokens['prompt']} in / {tokens['completion']} out{note}",
+            )
+        )
     print(label("Report", style(result["report_path"], "path")))
 
 

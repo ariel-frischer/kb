@@ -509,6 +509,26 @@ class TestCmdAsk:
 
         assert client.chat.completions.create.call_count == 3
 
+    def test_ask_with_cross_encoder_rerank_prints_without_tokens(
+        self, populated_db, capsys
+    ):
+        populated_db.rerank_top_k = 1
+        populated_db.rerank_method = "cross-encoder"
+        populated_db.hyde_enabled = False
+        client = _mock_openai_client(embed_dims=4)
+        encoder = MagicMock()
+        encoder.predict.side_effect = lambda pairs: list(range(len(pairs)))
+
+        with (
+            patch("kb.api.OpenAI", return_value=client),
+            patch("kb.rerank._get_cross_encoder", return_value=encoder),
+        ):
+            cmd_ask("question", populated_db, top_k=5)
+
+        out = capsys.readouterr().out
+        assert "(rerank: " in out
+        assert "tokens," not in out.split("(rerank: ")[1].split(")")[0]
+
     def test_ask_no_results_above_threshold(self, tmp_path, capsys):
         """When all results have similarity below threshold, show 'no relevant documents'."""
         # Build a DB where vec results have low cosine similarity to query

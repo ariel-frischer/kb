@@ -9,7 +9,9 @@ releases:
         commits: []
       - description: "`llm_provider = \"chatgpt\"` sends HyDE, LLM query expansion, LLM rerank, and `kb ask` answers through the ChatGPT subscription's Codex backend using the read-only `codex login` credentials in `~/.codex/auth.json` (`$CODEX_HOME`); `llm_reasoning_effort` (default `\"low\"`) tunes it. These calls cost $0 in cost reports and the `kb eval` budget while still reporting tokens. Embeddings still use `embed_method`. Unofficial for third-party tools"
         commits: []
-    fixed: []
+    fixed:
+      - description: "`kb ask` no longer crashes with `KeyError: 'prompt_tokens'` when `rerank_method = \"cross-encoder\"` reranks results; the rerank line omits token counts for local rerankers"
+        commits: []
     changed:
       - description: "`search_core` (and `kb search --json` / MCP `kb_search`) now include a `cost` summary: HyDE and LLM query-expansion token usage plus estimated query-embedding cost"
         commits: []

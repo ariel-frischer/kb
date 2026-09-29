@@ -564,11 +564,14 @@ def cmd_ask(
         return
 
     if rerank_info:
+        tokens = (
+            f"{rerank_info['prompt_tokens']}+{rerank_info['completion_tokens']} tokens, "
+            if "prompt_tokens" in rerank_info
+            else ""
+        )
         print(
             style(
-                f"(rerank: {rerank_info['rerank_ms']:.0f}ms, "
-                f"{rerank_info['prompt_tokens']}+"
-                f"{rerank_info['completion_tokens']} tokens, "
+                f"(rerank: {rerank_info['rerank_ms']:.0f}ms, {tokens}"
                 f"{rerank_info['input_count']} -> {rerank_info['output_count']})",
                 "muted",
             )

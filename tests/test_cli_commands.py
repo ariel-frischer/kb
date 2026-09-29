@@ -7,6 +7,7 @@ import pytest
 from kb.cli import (
     cmd_ask,
     cmd_completion,
+    cmd_eval,
     cmd_formats,
     cmd_index,
     cmd_list,
@@ -17,7 +18,9 @@ from kb.cli import (
     cmd_tags,
     cmd_untag,
 )
+from kb.api import search_core
 from kb.config import Config
+from kb.eval import EvalBudgetError
 from kb.db import connect
 from kb.embed import serialize_f32
 
@@ -350,6 +353,118 @@ class TestCmdSearch:
             f"{count_filtered} (filtered) vs {count_no_filter} (unfiltered)"
         )
 
+    def test_search_core_reports_hyde_usage_and_query_embedding_cost(
+        self, populated_db
+    ):
+        client = _mock_openai_client(embed_dims=4)
+        with patch("kb.api.OpenAI", return_value=client):
+            result = search_core("install", populated_db, top_k=5)
+
+        items = {item["name"]: item for item in result["cost"]["items"]}
+        assert items["hyde"]["prompt_tokens"] == 200
+        assert items["hyde"]["completion_tokens"] == 50
+        assert items["hyde"]["estimated_tokens"] is False
+        assert items["query_embeddings"]["tokens"] > 0
+        assert result["cost"]["known"] is True
+        assert result["cost"]["estimated_total_usd"] == pytest.approx(
+            items["hyde"]["usd"] + items["query_embeddings"]["usd"]
+        )
+
+
+def _eval_report(**overrides):
+    report = {
+        "run_id": "20260928T000000Z-scifact-abc123",
+        "dataset": "scifact",
+        "split": "test",
+        "k": 10,
+        "modes": ["fts", "hybrid"],
+        "corpus_docs": 5183,
+        "queries_total": 300,
+        "queries_selected": 300,
+        "budget_exhausted": False,
+        "metrics": {
+            "fts": {
+                "queries": 300,
+                "ndcg@10": 0.6512,
+                "recall@10": 0.78,
+                "mrr@10": 0.61,
+                "p@10": 0.087,
+                "latency_p50_ms": 3,
+                "usd": 0.0,
+            },
+            "hybrid": {
+                "queries": 300,
+                "ndcg@10": 0.7011,
+                "recall@10": 0.83,
+                "mrr@10": 0.66,
+                "p@10": 0.092,
+                "latency_p50_ms": 40,
+                "usd": 0.0,
+            },
+        },
+        "spend": {
+            "run_usd": 0.0,
+            "index_usd": 0.0,
+            "preflight_estimate_usd": 0.0,
+            "budget_usd": 10.0,
+            "ledger_total_usd": 1.25,
+            "remaining_usd": 8.75,
+            "ledger_path": "/tmp/eval/spend.json",
+            "llm_tokens": {"prompt": 0, "completion": 0},
+        },
+        "index": {"db_path": "/tmp/eval/indexes/scifact-x/kb.db", "fingerprint": "x"},
+        "config": {
+            "embed_method": "local",
+            "embed_model": "ibm-granite/granite-embedding-english-r2",
+            "hyde": "off",
+            "query_expand": "off",
+            "rerank_method": "n/a",
+            "chat_model": "gpt-4o-mini",
+            "llm_provider": "openai",
+        },
+        "report_path": "/tmp/eval/runs/x.json",
+    }
+    report.update(overrides)
+    return report
+
+
+class TestCmdEval:
+    def test_prints_metric_table_and_spend(self, capsys):
+        with patch("kb.cli.eval_core", return_value=_eval_report()) as core:
+            cmd_eval(Config(), ["scifact", "--mode", "fts,hybrid", "--limit", "50"])
+
+        _, kwargs = core.call_args
+        assert kwargs["modes"] == "fts,hybrid"
+        assert kwargs["limit"] == 50
+        assert kwargs["budget"] is None
+        out = capsys.readouterr().out
+        assert "nDCG@10" in out
+        assert "0.6512" in out and "0.7011" in out
+        assert "of $10.00 budget" in out
+        assert "Budget reached" not in out
+
+    def test_partial_run_is_flagged(self, capsys):
+        report = _eval_report(budget_exhausted=True)
+        with patch("kb.cli.eval_core", return_value=report):
+            cmd_eval(Config(), ["--budget", "2"])
+        assert "Budget reached" in capsys.readouterr().out
+
+    def test_budget_refusal_exits_nonzero(self, capsys):
+        err = EvalBudgetError("Refusing to run: estimated API cost $0.05 exceeds")
+        with patch("kb.cli.eval_core", side_effect=err):
+            with pytest.raises(SystemExit) as exc:
+                cmd_eval(Config(), ["scifact", "--budget", "0.0001"])
+        assert exc.value.code == 1
+        assert "Refusing to run" in capsys.readouterr().out
+
+    def test_bad_arguments_exit_before_running(self, capsys):
+        with patch("kb.cli.eval_core") as core:
+            with pytest.raises(SystemExit):
+                cmd_eval(Config(), ["--limit"])
+            with pytest.raises(SystemExit):
+                cmd_eval(Config(), ["--budget", "lots"])
+        core.assert_not_called()
+
 
 class TestCmdAsk:
     def test_no_db_exits(self, tmp_path):
@@ -393,6 +508,26 @@ class TestCmdAsk:
             cmd_ask("question", populated_db, top_k=5)
 
         assert client.chat.completions.create.call_count == 3
+
+    def test_ask_with_cross_encoder_rerank_prints_without_tokens(
+        self, populated_db, capsys
+    ):
+        populated_db.rerank_top_k = 1
+        populated_db.rerank_method = "cross-encoder"
+        populated_db.hyde_enabled = False
+        client = _mock_openai_client(embed_dims=4)
+        encoder = MagicMock()
+        encoder.predict.side_effect = lambda pairs: list(range(len(pairs)))
+
+        with (
+            patch("kb.api.OpenAI", return_value=client),
+            patch("kb.rerank._get_cross_encoder", return_value=encoder),
+        ):
+            cmd_ask("question", populated_db, top_k=5)
+
+        out = capsys.readouterr().out
+        assert "(rerank: " in out
+        assert "tokens," not in out.split("(rerank: ")[1].split(")")[0]
 
     def test_ask_no_results_above_threshold(self, tmp_path, capsys):
         """When all results have similarity below threshold, show 'no relevant documents'."""

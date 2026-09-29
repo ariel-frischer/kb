@@ -1,6 +1,6 @@
 [project]
 name = "kb"
-version = "1.4.0"
+version = "1.4.1"
 description = "CLI knowledge base: index markdown + PDFs, hybrid search, RAG answers. Powered by sqlite-vec."
 readme = "README.md"
 license = "MIT"
@@ -34,7 +34,7 @@ all = [
     "striprtf",
     "mcp[cli]>=1.8.0",
     "sentence-transformers>=3.0",
-    "transformers>=4.30",
+    "transformers>=4.51",
     "torch>=2.0",
 ]
 chunking = ["chonkie[hub]"]
@@ -42,10 +42,10 @@ pdf = ["pymupdf"]
 office = ["python-docx", "python-pptx", "openpyxl"]
 rtf = ["striprtf"]
 mcp = ["mcp[cli]>=1.8.0"]
-rerank = ["sentence-transformers>=3.0"]
+rerank = ["sentence-transformers>=3.0", "transformers>=4.51"]
 local-embed = ["sentence-transformers>=3.0"]
-expand = ["transformers>=4.30"]
-local-llm = ["transformers>=4.30", "torch>=2.0"]
+expand = ["transformers>=4.51", "torch>=2.0"]
+local-llm = ["transformers>=4.51", "torch>=2.0"]
 
 [project.scripts]
 kb = "kb.cli:main"

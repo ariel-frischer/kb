@@ -700,7 +700,7 @@ def run_eval(
         raise EvalBudgetError(
             f"Refusing to run: estimated API cost ${preflight:.4f} exceeds the "
             f"remaining eval budget ${max(remaining, 0.0):.4f} "
-            f"(budget ${budget_usd:.2f}, already spent ${spent_before:.4f}). "
+            f"(budget ${budget_usd:.4f}, already spent ${spent_before:.4f}). "
             "Raise --budget / eval_budget_usd, use --limit, or use local methods."
         )
 

@@ -1,26 +1,23 @@
 """Query expansion: generate keyword synonyms (lex) and semantic rephrasings (vec).
 
 Two methods:
-- local: FLAN-T5-small via transformers (no API cost, ~1s on CPU)
+- local: small causal LM (default Qwen3-0.6B) via transformers, no API cost
 - llm: OpenAI API call with JSON mode
 """
 
 import json
 import logging
-import os
+import re
 import time
-import warnings
 
 from openai import OpenAI
 
 from .config import Config
 from .cost import estimate_tokens
+from .hyde import load_causal_lm
 from .llm import complete
 
 log = logging.getLogger(__name__)
-
-# Lazy-loaded T5 model cache (same pattern as rerank.py cross-encoder)
-_expand_model_cache: dict[str, tuple] = {}
 
 _LLM_PROMPT = """\
 Generate search query expansions. Return JSON: {{"lex": ["keyword variant 1", ...], "vec": ["semantic rephrasing 1", ...]}}
@@ -103,80 +100,52 @@ def llm_expand_with_usage(
         "estimated_tokens": estimated,
     }
 
+    return _parse_expansions(text, query), usage
+
+
+def _parse_expansions(text: str, query: str) -> list[dict]:
+    """Parse the {"lex": [...], "vec": [...]} contract, dropping echoes of the query."""
+    match = re.search(r"\{.*\}", text, re.DOTALL)
     try:
-        data = json.loads(text)
+        data = json.loads(match.group(0) if match else text)
     except Exception:
-        log.warning("Query expansion (LLM) failed", exc_info=True)
-        return [], usage
+        log.warning("Query expansion returned non-JSON output", exc_info=True)
+        return []
+    if not isinstance(data, dict):
+        return []
 
     results = []
     query_lower = query.lower().strip()
-    for variant in data.get("lex", []):
-        if isinstance(variant, str) and variant.lower().strip() != query_lower:
-            results.append({"type": "lex", "text": variant})
-    for variant in data.get("vec", []):
-        if isinstance(variant, str) and variant.lower().strip() != query_lower:
-            results.append({"type": "vec", "text": variant})
-    return results, usage
-
-
-def _get_t5_model(model_name: str):
-    """Load and cache a T5 model + tokenizer (lazy import)."""
-    if model_name not in _expand_model_cache:
-        try:
-            from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
-        except ImportError:
-            raise ImportError(
-                "transformers is required for local query expansion. "
-                "Install with: pip install 'kb[expand]' or pip install transformers"
-            )
-        _prev = os.environ.get("HF_HUB_DISABLE_IMPLICIT_TOKEN")
-        os.environ["HF_HUB_DISABLE_IMPLICIT_TOKEN"] = "1"
-        with warnings.catch_warnings():
-            warnings.filterwarnings("ignore", message=".*unauthenticated.*")
-            tokenizer = AutoTokenizer.from_pretrained(model_name)
-            model = AutoModelForSeq2SeqLM.from_pretrained(model_name)
-        if _prev is None:
-            os.environ.pop("HF_HUB_DISABLE_IMPLICIT_TOKEN", None)
-        else:
-            os.environ["HF_HUB_DISABLE_IMPLICIT_TOKEN"] = _prev
-        _expand_model_cache[model_name] = (tokenizer, model)
-    return _expand_model_cache[model_name]
+    for kind in ("lex", "vec"):
+        for variant in data.get(kind) or []:
+            if isinstance(variant, str) and variant.lower().strip() != query_lower:
+                results.append({"type": kind, "text": variant.strip()})
+    return results
 
 
 def local_expand(query: str, cfg: Config) -> list[dict]:
-    """FLAN-T5-small expansion via transformers (lazy-loaded, cached)."""
+    """Expansion with a local chat LM (lazy-loaded, cached), same JSON contract as llm."""
     try:
-        tokenizer, model = _get_t5_model(cfg.expand_model)
+        tokenizer, model, device = load_causal_lm(cfg.expand_model)
     except ImportError:
         raise
     except Exception:
         log.warning("Query expansion (local) failed to load model", exc_info=True)
         return []
 
-    results = []
-    query_lower = query.lower().strip()
-
     try:
-        # Generate keyword synonyms
-        lex_prompt = f"Generate keyword synonyms for this search query: {query}"
-        inputs = tokenizer(lex_prompt, return_tensors="pt", truncation=True)
-        outputs = model.generate(**inputs, max_new_tokens=50, num_beams=3)
-        lex_text = tokenizer.decode(outputs[0], skip_special_tokens=True).strip()
-        for line in lex_text.replace(",", "\n").split("\n"):
-            variant = line.strip()
-            if variant and variant.lower() != query_lower:
-                results.append({"type": "lex", "text": variant})
-
-        # Generate semantic rephrasing
-        vec_prompt = f"Rephrase this search query: {query}"
-        inputs = tokenizer(vec_prompt, return_tensors="pt", truncation=True)
-        outputs = model.generate(**inputs, max_new_tokens=60, num_beams=3)
-        vec_text = tokenizer.decode(outputs[0], skip_special_tokens=True).strip()
-        if vec_text and vec_text.lower() != query_lower:
-            results.append({"type": "vec", "text": vec_text})
+        messages = [{"role": "user", "content": _LLM_PROMPT.format(query=query)}]
+        prompt = tokenizer.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True, enable_thinking=False
+        )
+        inputs = tokenizer(prompt, return_tensors="pt").to(device)
+        input_len = inputs["input_ids"].shape[1]
+        outputs = model.generate(
+            **inputs, max_new_tokens=EXPAND_MAX_TOKENS, do_sample=False
+        )
+        text = tokenizer.decode(outputs[0][input_len:], skip_special_tokens=True)
     except Exception:
         log.warning("Query expansion (local) generation failed", exc_info=True)
         return []
 
-    return results
+    return _parse_expansions(text, query)

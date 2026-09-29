@@ -38,6 +38,10 @@ _LOGIN_HINT = "Run `codex login` (or any codex command to refresh the session)."
 
 _chatgpt_clients: dict[tuple[str, str], OpenAI] = {}
 
+# OpenAI reasoning families reject `max_tokens` and take `reasoning_effort`;
+# they only accept `temperature` when reasoning effort is "none".
+_REASONING_MODEL_PREFIXES = ("gpt-5", "gpt-6", "o1", "o3", "o4")
+
 
 def _kb_error(message: str) -> Exception:
     from .api import KBError  # api imports this module's callers; avoid a cycle
@@ -201,12 +205,16 @@ def complete(
 
     messages = [{"role": "system", "content": system}] if system else []
     messages.append({"role": "user", "content": user})
-    kwargs: dict = {
-        "model": model,
-        "messages": messages,
-        "temperature": temperature,
-        "max_tokens": max_tokens,
-    }
+    kwargs: dict = {"model": model, "messages": messages}
+    if model.startswith(_REASONING_MODEL_PREFIXES):
+        effort = cfg.llm_reasoning_effort
+        kwargs["reasoning_effort"] = effort
+        kwargs["max_completion_tokens"] = max_tokens
+        if effort == "none":
+            kwargs["temperature"] = temperature
+    else:
+        kwargs["temperature"] = temperature
+        kwargs["max_tokens"] = max_tokens
     if json_mode:
         kwargs["response_format"] = {"type": "json_object"}
     resp = client.chat.completions.create(**kwargs)

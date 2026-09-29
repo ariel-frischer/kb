@@ -12,7 +12,7 @@ CLI RAG tool for your docs. Index 30+ document formats (markdown, PDF, DOCX, EPU
 - **Keyword-only search** — `kb fts` for instant BM25 results with zero API cost (match-any terms ranked by BM25, stopwords skipped; truncated filepath matches weighted 10x, headings 2x)
 - **Heading-aware chunking** — markdown split by heading hierarchy, each chunk carries ancestry
 - **Incremental indexing** — content-hash per chunk, only re-embeds changes
-- **Query expansion** — generates keyword synonyms (for FTS) and semantic rephrasings (for vector search) via local FLAN-T5 or LLM, fuses all result lists with multi-list weighted RRF (`--expand`)
+- **Query expansion** — generates keyword synonyms (for FTS) and semantic rephrasings (for vector search) via a local Qwen3 model or LLM, fuses all result lists with multi-list weighted RRF (`--expand`)
 - **Reranking** — `ask` over-fetches candidates, reranks by relevance (local cross-encoder or LLM), keeps the best
 - **Pre-search filters** — file globs, document type, tags, date ranges, keyword inclusion/exclusion
 - **Document tagging** — manual tags via `kb tag`, auto-parsed from markdown frontmatter
@@ -43,13 +43,13 @@ uv tool install --from "git+https://github.com/ariel-frischer/kb.git" "kb[office
 uv tool install --from "git+https://github.com/ariel-frischer/kb.git" "kb[rtf]"       # + RTF
 uv tool install --from "git+https://github.com/ariel-frischer/kb.git" "kb[local-embed]" # + local embeddings (Granite R2, no API cost)
 uv tool install --from "git+https://github.com/ariel-frischer/kb.git" "kb[rerank]"    # + local cross-encoder reranking
-uv tool install --from "git+https://github.com/ariel-frischer/kb.git" "kb[expand]"    # + local query expansion (FLAN-T5)
+uv tool install --from "git+https://github.com/ariel-frischer/kb.git" "kb[expand]"    # + local query expansion (Qwen3)
 uv tool install --from "git+https://github.com/ariel-frischer/kb.git" "kb[local-llm]" # + local HyDE generation (transformers + torch)
 ```
 
 **Runs fully local — no API keys required.** Set `embed_method = "local"` in config (see [Configuration](#configuration)) and use local backends for HyDE (`hyde_method = "local"`), reranking (`rerank_method = "cross-encoder"`), and query expansion (`expand_method = "local"`). Only `kb ask` needs an LLM for the final answer — point it at a local model via Ollama or similar.
 
-For cloud, the defaults work with any OpenAI-compatible API. Set `OPENAI_API_KEY` in your environment (or in `~/.config/kb/secrets.toml`). Recommended cloud models: `text-embedding-3-small` for embeddings, `gpt-4o-mini` for chat/ask. Works with any provider that speaks the OpenAI API — set `OPENAI_BASE_URL` to point at Ollama, LiteLLM, vLLM, etc.
+For cloud, the defaults work with any OpenAI-compatible API. Set `OPENAI_API_KEY` in your environment (or in `~/.config/kb/secrets.toml`). Recommended cloud models: `text-embedding-3-small` for embeddings, `gpt-6-luna` for chat/ask. Works with any provider that speaks the OpenAI API — set `OPENAI_BASE_URL` to point at Ollama, LiteLLM, vLLM, etc.
 
 ## Quickstart
 
@@ -168,16 +168,16 @@ sources = [
 # embed_model = "text-embedding-3-small"
 # embed_dims = 1536
 # local_embed_model = "ibm-granite/granite-embedding-english-r2"  # or "Snowflake/snowflake-arctic-embed-m-v1.5"
-# chat_model = "gpt-4o-mini"
+# chat_model = "gpt-6-luna"
 # llm_provider = "openai"  # "openai" (API key) or "chatgpt" (ChatGPT subscription, see below)
-# llm_reasoning_effort = "low"  # reasoning effort for llm_provider = "chatgpt"
+# llm_reasoning_effort = "none"  # reasoning effort for gpt-5/gpt-6/o-series models
 # max_chunk_chars = 2000
 # search_threshold = 0.001      # min cosine similarity for `kb search` (also --threshold flag)
 # ask_threshold = 0.001         # min cosine similarity for `kb ask` (also --threshold flag)
 # rerank_fetch_k = 20
 # rerank_top_k = 5
 # rerank_method = "llm"     # "llm" (RankGPT) or "cross-encoder" (local, no API cost)
-# cross_encoder_model = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+# cross_encoder_model = "Alibaba-NLP/gte-reranker-modernbert-base"
 # hyde_enabled = true       # generate hypothetical passage before vector search
 # hyde_model = ""           # LLM for HyDE ("" = use chat_model)
 # hyde_method = "llm"      # "llm" (OpenAI API) or "local" (transformers, no API cost)
@@ -185,8 +185,8 @@ sources = [
 # hyde_base_url = ""        # base URL for HyDE LLM ("" = use default OpenAI)
 # hyde_api_key = ""         # API key for HyDE LLM ("" = use default; supports "env:VAR_NAME")
 # query_expand = false     # generate keyword + semantic query expansions (also --expand flag)
-# expand_method = "local"  # "local" (FLAN-T5) or "llm" (OpenAI API)
-# expand_model = "google/flan-t5-small"  # model for local expand method
+# expand_method = "local"  # "local" (Qwen3) or "llm" (OpenAI API)
+# expand_model = "Qwen/Qwen3-0.6B"  # causal LM for local expand method
 # bm25_shortcut_min = 0.85 # min normalized BM25 for ask shortcut
 # bm25_shortcut_gap = 0.02 # min gap vs second doc for ask shortcut
 # index_code = false       # set true to also index source code files
@@ -233,7 +233,7 @@ Set `llm_provider = "chatgpt"` to send HyDE, LLM query expansion, LLM rerank, an
 ```toml
 llm_provider = "chatgpt"
 chat_model = "gpt-6-luna"        # a model your ChatGPT plan offers in Codex
-# llm_reasoning_effort = "low"
+# llm_reasoning_effort = "none"
 embed_method = "local"           # embeddings are not available via ChatGPT login
 ```
 

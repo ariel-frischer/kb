@@ -40,7 +40,7 @@ src/kb/
 ├── embed.py       — Embedding dispatcher: local (SentenceTransformer, Granite R2 default) or OpenAI API, auto-detected dims, with serialize/deserialize for sqlite-vec
 ├── extract.py     — Text extraction registry for 30+ formats (PDF, DOCX, EPUB, HTML, ODT, etc.)
 ├── hyde.py        — HyDE: generates hypothetical answer passage (local model or LLM API) for better vector retrieval
-├── expand.py      — Query expansion: local (FLAN-T5) or LLM, generates keyword + semantic variants
+├── expand.py      — Query expansion: local (Qwen3) or LLM, generates keyword + semantic variants
 ├── search.py      — Hybrid search (vector + FTS5), RRF fusion, multi-list RRF for expansion
 ├── rerank.py      — Reranking: local cross-encoder (sentence-transformers) or LLM (RankGPT)
 ├── filters.py     — Pre-search filter parsing + application (file:, type:, tag:, dt>, dt<, +"kw", -"kw")
@@ -68,7 +68,7 @@ src/kb/
 - **Reciprocal Rank Fusion** — combines vector and keyword rankings without needing score normalization
 - **FTS5 field weighting** — `fts_path` (10x), `heading` (2x), `text` (1x) via BM25 rank config. `fts_path` stores last 2 path components to avoid IDF collapse from common prefixes; filepath matches strongly boost relevance
 - **HyDE best-of-two** — embeds both raw query and hypothetical passage in one batch, runs two vec queries, keeps whichever has better top-1 similarity. HyDE can only help, never hurt. Two methods: `"llm"` (OpenAI-compatible API) or `"local"` (causal LM via transformers, default Qwen/Qwen3-0.6B, no API cost). LLM method supports separate provider via `hyde_base_url`/`hyde_api_key` (e.g. Google Gemini). FTS still uses original query.
-- **Query expansion** — opt-in (`--expand`), generates keyword synonyms (`lex`) and semantic rephrasings (`vec`) via local FLAN-T5 or LLM, fused with primary results via multi-list weighted RRF
+- **Query expansion** — opt-in (`--expand`), generates keyword synonyms (`lex`) and semantic rephrasings (`vec`) via local Qwen3 or LLM, fused with primary results via multi-list weighted RRF
 - **Content-hash per chunk** — incremental indexing only re-embeds changed content
 - **Config walks up from cwd** — like `.gitignore`, so `kb` works from any subdirectory
 - **Project DB in XDG data dir** — project-mode databases live at `~/.local/share/kb/projects/<hash>/kb.db` (SHA-256 of config dir), keeping WAL sidecar files out of the project directory. Explicit `db = "..."` in `.kb.toml` overrides for backward compat

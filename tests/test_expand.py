@@ -80,39 +80,46 @@ class TestLlmExpand:
 
 
 class TestLocalExpand:
-    def test_returns_typed_results(self, cfg):
+    def test_parses_json_from_model_output(self, cfg):
         cfg.expand_method = "local"
 
         mock_tokenizer = MagicMock()
         mock_model = MagicMock()
-        mock_tokenizer.return_value = {"input_ids": MagicMock()}
-        mock_model.generate.return_value = [MagicMock()]
-        mock_tokenizer.decode.side_effect = [
-            "async coroutine, await pattern",
-            "how does async work in python",
-        ]
+        mock_tokenizer.decode.return_value = (
+            'Here you go: {"lex": ["coroutine", "Python Async"], '
+            '"vec": ["how does async work in python"]}'
+        )
 
         with patch(
-            "kb.expand._get_t5_model", return_value=(mock_tokenizer, mock_model)
+            "kb.expand.load_causal_lm",
+            return_value=(mock_tokenizer, mock_model, "cpu"),
         ):
             results = local_expand("python async", cfg)
 
-        lex = [r for r in results if r["type"] == "lex"]
-        vec = [r for r in results if r["type"] == "vec"]
-        assert len(lex) >= 1
-        assert len(vec) == 1
-        assert all(r["text"] for r in results)
+        assert results == [
+            {"type": "lex", "text": "coroutine"},
+            {"type": "vec", "text": "how does async work in python"},
+        ]
+
+    def test_non_json_output_returns_empty(self, cfg):
+        mock_tokenizer = MagicMock()
+        mock_tokenizer.decode.return_value = "async coroutine, await pattern"
+
+        with patch(
+            "kb.expand.load_causal_lm",
+            return_value=(mock_tokenizer, MagicMock(), "cpu"),
+        ):
+            assert local_expand("python async", cfg) == []
 
     def test_import_error(self, cfg):
         cfg.expand_method = "local"
 
-        with patch("kb.expand._expand_model_cache", {}):
-            with patch(
-                "kb.expand._get_t5_model",
-                side_effect=ImportError("transformers required"),
-            ):
-                with pytest.raises(ImportError, match="transformers"):
-                    local_expand("test query", cfg)
+        with patch(
+            "kb.expand.load_causal_lm",
+            side_effect=ImportError("transformers required"),
+        ):
+            with pytest.raises(ImportError, match="transformers"):
+                local_expand("test query", cfg)
 
 
 class TestExpandDispatch:

@@ -33,9 +33,9 @@ sources = [
 # local_embed_model = "ibm-granite/granite-embedding-english-r2"  # or "Snowflake/snowflake-arctic-embed-m-v1.5"
 
 # LLM
-# chat_model = "gpt-4o-mini"
+# chat_model = "gpt-6-luna"
 # llm_provider = "openai"            # "openai" (API key) or "chatgpt" (ChatGPT subscription via `codex login`)
-# llm_reasoning_effort = "low"       # reasoning effort for llm_provider = "chatgpt"
+# llm_reasoning_effort = "none"      # reasoning effort for gpt-5/gpt-6/o-series models
 
 # Chunking
 # max_chunk_chars = 2000
@@ -48,7 +48,7 @@ sources = [
 # rerank_fetch_k = 20       # candidates to fetch for LLM rerank
 # rerank_top_k = 5          # how many to keep after rerank
 # rerank_method = "llm"     # "llm" (RankGPT, default) or "cross-encoder" (local, no API cost)
-# cross_encoder_model = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+# cross_encoder_model = "Alibaba-NLP/gte-reranker-modernbert-base"
 
 # HyDE (Hypothetical Document Embeddings)
 # hyde_enabled = true                # generate hypothetical passage before vector search
@@ -60,8 +60,8 @@ sources = [
 
 # Query expansion (generate keyword synonyms + semantic rephrasings)
 # query_expand = false               # enable query expansion
-# expand_method = "local"            # "local" (FLAN-T5, no API cost) or "llm" (OpenAI API)
-# expand_model = "google/flan-t5-small"  # model for local expand method
+# expand_method = "local"            # "local" (Qwen3, no API cost) or "llm" (OpenAI API)
+# expand_model = "Qwen/Qwen3-0.6B"   # causal LM for local expand method
 
 # BM25 shortcut (skip embedding when top FTS result is dominant)
 # bm25_shortcut_min = 0.85          # min normalized BM25 for top doc
@@ -95,9 +95,9 @@ sources = [
 # local_embed_model = "ibm-granite/granite-embedding-english-r2"  # or "Snowflake/snowflake-arctic-embed-m-v1.5"
 
 # LLM
-# chat_model = "gpt-4o-mini"
+# chat_model = "gpt-6-luna"
 # llm_provider = "openai"            # "openai" (API key) or "chatgpt" (ChatGPT subscription via `codex login`)
-# llm_reasoning_effort = "low"       # reasoning effort for llm_provider = "chatgpt"
+# llm_reasoning_effort = "none"      # reasoning effort for gpt-5/gpt-6/o-series models
 
 # HyDE (Hypothetical Document Embeddings)
 # hyde_enabled = true                # generate hypothetical passage before vector search
@@ -109,8 +109,8 @@ sources = [
 
 # Query expansion (generate keyword synonyms + semantic rephrasings)
 # query_expand = false               # enable query expansion
-# expand_method = "local"            # "local" (FLAN-T5, no API cost) or "llm" (OpenAI API)
-# expand_model = "google/flan-t5-small"  # model for local expand method
+# expand_method = "local"            # "local" (Qwen3, no API cost) or "llm" (OpenAI API)
+# expand_model = "Qwen/Qwen3-0.6B"   # causal LM for local expand method
 
 # BM25 shortcut (skip embedding when top FTS result is dominant)
 # bm25_shortcut_min = 0.85          # min normalized BM25 for top doc
@@ -140,9 +140,9 @@ class Config:
     embed_model: str = "text-embedding-3-small"
     embed_dims: int = 1536
     local_embed_model: str = "ibm-granite/granite-embedding-english-r2"
-    chat_model: str = "gpt-4o-mini"
+    chat_model: str = "gpt-6-luna"
     llm_provider: str = "openai"  # "openai" (API key) or "chatgpt" (Codex OAuth)
-    llm_reasoning_effort: str = "low"  # reasoning effort for the chatgpt provider
+    llm_reasoning_effort: str = "none"  # for gpt-5/gpt-6/o-series models
     max_chunk_chars: int = 2000
     min_chunk_chars: int = 50
     search_threshold: float = 0.001
@@ -154,7 +154,7 @@ class Config:
     allowed_large_files: list[str] = field(default_factory=list)
     index_code: bool = False
     rerank_method: str = "llm"  # "llm" (RankGPT) or "cross-encoder"
-    cross_encoder_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    cross_encoder_model: str = "Alibaba-NLP/gte-reranker-modernbert-base"
     hyde_enabled: bool = True  # generate hypothetical doc before vector search
     hyde_model: str = ""  # LLM for HyDE ("" = use chat_model)
     hyde_method: str = "llm"  # "llm" (OpenAI API) or "local" (transformers)
@@ -162,8 +162,8 @@ class Config:
     hyde_base_url: str = ""  # base URL for HyDE LLM ("" = use default OpenAI)
     hyde_api_key: str = ""  # API key for HyDE LLM ("" = use default)
     query_expand: bool = False  # generate keyword + semantic query expansions
-    expand_method: str = "local"  # "local" (FLAN-T5) or "llm" (OpenAI API)
-    expand_model: str = "google/flan-t5-small"  # model for local expand method
+    expand_method: str = "local"  # "local" (Qwen3) or "llm" (OpenAI API)
+    expand_model: str = "Qwen/Qwen3-0.6B"  # causal LM for local expand method
     bm25_shortcut_min: float = 0.85  # min top-doc norm for BM25 shortcut
     bm25_shortcut_gap: float = 0.02  # min gap vs second-doc for BM25 shortcut
     eval_budget_usd: float = 10.0  # cumulative API spend cap for `kb eval`

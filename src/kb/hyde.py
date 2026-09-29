@@ -45,7 +45,7 @@ def _get_device() -> str:
     return "cpu"
 
 
-def _get_local_model(model_name: str):
+def load_causal_lm(model_name: str):
     """Load and cache a causal LM + tokenizer (lazy import)."""
     if model_name not in _hyde_model_cache:
         try:
@@ -86,7 +86,7 @@ def local_hyde_passage(query: str, cfg: Config) -> tuple[str | None, float]:
     """Generate a hypothetical passage using a local causal LM."""
     t0 = time.time()
     try:
-        tokenizer, model, device = _get_local_model(cfg.hyde_local_model)
+        tokenizer, model, device = load_causal_lm(cfg.hyde_local_model)
     except ImportError:
         raise
     except Exception:
@@ -100,7 +100,7 @@ def local_hyde_passage(query: str, cfg: Config) -> tuple[str | None, float]:
             {"role": "user", "content": query},
         ]
         text = tokenizer.apply_chat_template(
-            messages, tokenize=False, add_generation_prompt=True
+            messages, tokenize=False, add_generation_prompt=True, enable_thinking=False
         )
         inputs = tokenizer(text, return_tensors="pt").to(device)
         input_len = inputs["input_ids"].shape[1]

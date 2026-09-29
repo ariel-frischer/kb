@@ -178,6 +178,30 @@ class TestComplete:
         assert req["response_format"] == {"type": "json_object"}
         assert req["max_tokens"] == 20
 
+    @pytest.mark.parametrize(
+        ("effort", "has_temperature"), [("none", True), ("low", False)]
+    )
+    def test_openai_reasoning_model_params(self, effort, has_temperature):
+        client = MagicMock()
+        client.chat.completions.create.return_value = SimpleNamespace(
+            choices=[SimpleNamespace(message=SimpleNamespace(content="ok"))],
+            usage=None,
+        )
+        llm.complete(
+            Config(llm_reasoning_effort=effort),
+            client,
+            model="gpt-6-luna",
+            system="",
+            user="hi",
+            temperature=0.3,
+            max_tokens=20,
+        )
+        req = client.chat.completions.create.call_args.kwargs
+        assert "max_tokens" not in req
+        assert req["max_completion_tokens"] == 20
+        assert req["reasoning_effort"] == effort
+        assert ("temperature" in req) is has_temperature
+
     def test_unknown_provider_rejected(self):
         with pytest.raises(KBError, match="llm_provider"):
             llm.complete(

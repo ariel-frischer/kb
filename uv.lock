@@ -522,7 +522,7 @@ wheels = [
 
 [[package]]
 name = "kb"
-version = "1.4.0"
+version = "1.4.1"
 source = { editable = "." }
 dependencies = [
     { name = "openai" },
@@ -546,6 +546,7 @@ chunking = [
     { name = "chonkie", extra = ["hub"] },
 ]
 expand = [
+    { name = "torch" },
     { name = "transformers" },
 ]
 local-embed = [
@@ -568,6 +569,7 @@ pdf = [
 ]
 rerank = [
     { name = "sentence-transformers" },
+    { name = "transformers" },
 ]
 rtf = [
     { name = "striprtf" },
@@ -601,10 +603,12 @@ requires-dist = [
     { name = "striprtf", marker = "extra == 'all'" },
     { name = "striprtf", marker = "extra == 'rtf'" },
     { name = "torch", marker = "extra == 'all'", specifier = ">=2.0" },
+    { name = "torch", marker = "extra == 'expand'", specifier = ">=2.0" },
     { name = "torch", marker = "extra == 'local-llm'", specifier = ">=2.0" },
-    { name = "transformers", marker = "extra == 'all'", specifier = ">=4.30" },
-    { name = "transformers", marker = "extra == 'expand'", specifier = ">=4.30" },
-    { name = "transformers", marker = "extra == 'local-llm'", specifier = ">=4.30" },
+    { name = "transformers", marker = "extra == 'all'", specifier = ">=4.51" },
+    { name = "transformers", marker = "extra == 'expand'", specifier = ">=4.51" },
+    { name = "transformers", marker = "extra == 'local-llm'", specifier = ">=4.51" },
+    { name = "transformers", marker = "extra == 'rerank'", specifier = ">=4.51" },
 ]
 provides-extras = ["all", "chunking", "pdf", "office", "rtf", "mcp", "rerank", "local-embed", "expand", "local-llm"]
 

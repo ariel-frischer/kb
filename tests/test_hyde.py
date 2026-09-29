@@ -106,7 +106,7 @@ class TestMethodDispatch:
         assert passage == "LLM passage"
         client.chat.completions.create.assert_called_once()
 
-    @patch("kb.hyde._get_local_model")
+    @patch("kb.hyde.load_causal_lm")
     def test_local_method_calls_local_model(self, mock_get_model):
         mock_tokenizer = MagicMock()
         mock_model = MagicMock()
@@ -131,7 +131,7 @@ class TestMethodDispatch:
         assert elapsed > 0
         mock_get_model.assert_called_once_with("test/model")
 
-    @patch("kb.hyde._get_local_model")
+    @patch("kb.hyde.load_causal_lm")
     def test_local_method_returns_none_on_empty(self, mock_get_model):
         mock_tokenizer = MagicMock()
         mock_model = MagicMock()
@@ -155,7 +155,7 @@ class TestMethodDispatch:
         assert passage is None
         assert elapsed > 0
 
-    @patch("kb.hyde._get_local_model")
+    @patch("kb.hyde.load_causal_lm")
     def test_local_method_returns_none_on_generation_error(self, mock_get_model):
         mock_tokenizer = MagicMock()
         mock_model = MagicMock()
@@ -170,7 +170,7 @@ class TestMethodDispatch:
         assert passage is None
         assert elapsed > 0
 
-    @patch("kb.hyde._get_local_model")
+    @patch("kb.hyde.load_causal_lm")
     def test_local_method_returns_none_on_model_load_error(self, mock_get_model):
         mock_get_model.side_effect = RuntimeError("model load failed")
 
@@ -185,7 +185,7 @@ class TestMethodDispatch:
         client = _mock_client()
         cfg = Config(hyde_method="local")
 
-        with patch("kb.hyde._get_local_model") as mock_get_model:
+        with patch("kb.hyde.load_causal_lm") as mock_get_model:
             mock_tokenizer = MagicMock()
             mock_model = MagicMock()
             mock_get_model.return_value = (mock_tokenizer, mock_model, "cpu")

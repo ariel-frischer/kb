@@ -7,6 +7,7 @@ from typing import Any
 
 
 CHAT_PRICES_PER_1M = {
+    "gpt-6-luna": {"input": 0.10, "output": 0.50},
     "gpt-4o-mini": {"input": 0.15, "output": 0.60},
     "gpt-4o": {"input": 2.50, "output": 10.00},
 }

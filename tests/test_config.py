@@ -21,7 +21,7 @@ class TestConfigDataclass:
         cfg = Config()
         assert cfg.embed_model == "text-embedding-3-small"
         assert cfg.embed_dims == 1536
-        assert cfg.chat_model == "gpt-4o-mini"
+        assert cfg.chat_model == "gpt-6-luna"
         assert cfg.max_chunk_chars == 2000
         assert cfg.min_chunk_chars == 50
         assert cfg.search_threshold == 0.001

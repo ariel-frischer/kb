@@ -32,7 +32,7 @@ uv run kb --help        # run locally
 ```
 src/kb/
 ├── cli.py         — Entry point, command dispatch, human-readable output (thin wrappers over api.py)
-├── api.py         — Core logic for search/ask/fts/similar/stats/list/feedback (returns dicts, no I/O)
+├── api.py         — Core logic for search/ask/fts/similar/stats/list/feedback/eval (returns dicts, no I/O)
 ├── mcp_server.py  — MCP server (FastMCP, stdio) exposing kb tools for AI agents
 ├── config.py      — .kb.toml loading, Config dataclass, secrets.toml loading
 ├── db.py          — SQLite schema, sqlite-vec connection, migrations
@@ -44,6 +44,9 @@ src/kb/
 ├── search.py      — Hybrid search (vector + FTS5), RRF fusion, multi-list RRF for expansion
 ├── rerank.py      — Reranking: local cross-encoder (sentence-transformers) or LLM (RankGPT)
 ├── filters.py     — Pre-search filter parsing + application (file:, type:, tag:, dt>, dt<, +"kw", -"kw")
+├── cost.py        — API price table + token/cost estimation helpers
+├── llm.py         — Chat completion helper: OpenAI API key (chat.completions) or ChatGPT subscription (Codex OAuth, Responses API)
+├── eval.py        — `kb eval`: BEIR download/cache, isolated eval index, metrics, spend ledger + budget guard
 └── ingest.py      — File indexing pipeline (unified loop over all supported formats, frontmatter tag parsing)
 ```
 
@@ -56,6 +59,8 @@ src/kb/
 **Ask** (`kb ask`): BM25 probe (LIMIT 20, dedup by document, shortcut if top norm >= `bm25_shortcut_min` with gap >= `bm25_shortcut_gap`) → if shortcut: FTS only; else: [HyDE best-of-two] → [expand] → vec+fts (multi-query; SQL-level pre-filtered to tagged chunk IDs if `tag:` active) → multi-list weighted RRF → apply remaining filters → rerank (cross-encoder or LLM) → confidence threshold → LLM generates answer from context
 
 **Similar** (`kb similar`): read chunk embeddings from vec0 → average into doc vector → KNN query → filter self → aggregate by doc → rank by similarity
+
+**Eval** (`kb eval`): refuse unpriced API models → download BEIR dataset once (UKP zip, HF mirror fallback) → one `<doc_id>.md` per doc → preflight cost estimate vs remaining budget (`~/.local/share/kb/eval/spend.json`) → `index_directory` into an isolated `~/.local/share/kb/eval/indexes/<dataset>-<fingerprint>/kb.db` → per query: guard remaining budget, run `fts_core` / `search_core` / rerank, record actual cost, collapse chunks to docs → nDCG/Recall/MRR/P@10 report saved under `eval/runs/`
 
 ### Key design decisions
 

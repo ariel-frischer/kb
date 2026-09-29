@@ -14,11 +14,10 @@ from .cost import (
     cost_summary,
     embed_cost_usd,
     estimate_tokens,
-    usage_tokens,
 )
 from .db import connect
 from .embed import deserialize_f32, embed_batch, serialize_f32
-from .expand import expand_query
+from .expand import expand_query, expand_query_with_usage
 from .filters import (
     apply_filters,
     get_tagged_chunk_ids,
@@ -26,7 +25,8 @@ from .filters import (
     parse_filters,
     remove_tag_filter,
 )
-from .hyde import generate_hyde_passage, generate_hyde_passage_with_usage
+from .hyde import generate_hyde_passage_with_usage
+from .llm import complete, openai_client_needed
 from .rerank import rerank
 from .search import (
     fill_fts_only_results,
@@ -111,14 +111,16 @@ def _chat_cost_item(
     prompt_tokens: int,
     completion_tokens: int,
     estimated_tokens: bool = False,
+    provider: str = "openai",
 ) -> dict:
     return {
         "name": name,
         "model": model,
+        "provider": provider,
         "prompt_tokens": prompt_tokens,
         "completion_tokens": completion_tokens,
         "estimated_tokens": estimated_tokens,
-        "usd": chat_cost_usd(model, prompt_tokens, completion_tokens),
+        "usd": chat_cost_usd(model, prompt_tokens, completion_tokens, provider),
     }
 
 
@@ -206,7 +208,7 @@ def search_core(
     _require_index(cfg)
 
     conn = connect(cfg)
-    client = OpenAI()
+    client = OpenAI() if openai_client_needed(cfg) else None
 
     clean_query, filters = parse_filters(query)
     has_filters = has_active_filters(filters)
@@ -215,8 +217,13 @@ def search_core(
     hyde_ms = 0.0
     expand_ms = 0.0
     expansions: list[dict] = []
+    cost_items: list[dict] = []
     if cfg.hyde_enabled:
-        hyde_passage, hyde_ms = generate_hyde_passage(clean_query, client, cfg)
+        hyde_passage, hyde_ms, hyde_usage = generate_hyde_passage_with_usage(
+            clean_query, client, cfg
+        )
+        if hyde_usage:
+            cost_items.append(_chat_cost_item(name="hyde", **hyde_usage))
 
     has_threshold = cfg.search_threshold > 0
     retrieve_k = (top_k * 5) if has_filters else (top_k * 3)
@@ -228,7 +235,11 @@ def search_core(
         retrieve_k = max(retrieve_k, len(tagged_chunk_ids) + top_k)
 
     if cfg.query_expand:
-        expansions, expand_ms = expand_query(client, clean_query, cfg)
+        expansions, expand_ms, expand_usage = expand_query_with_usage(
+            client, clean_query, cfg
+        )
+        if expand_usage:
+            cost_items.append(_chat_cost_item(name="expand", **expand_usage))
         lex_exps = [e for e in expansions if e["type"] == "lex"]
         vec_exps = [e for e in expansions if e["type"] == "vec"]
 
@@ -243,11 +254,23 @@ def search_core(
             cfg,
             tagged_ids=tagged_chunk_ids,
         )
+        cost_items.append(
+            _embedding_cost_item(
+                "query_embeddings",
+                cfg,
+                [clean_query, hyde_passage] if hyde_passage else [clean_query],
+            )
+        )
 
         # Batch embed vec expansions (separate call)
         if vec_exps:
             exp_embeddings = embed_batch(
                 client, [e["text"] for e in vec_exps], cfg, is_query=True
+            )
+            cost_items.append(
+                _embedding_cost_item(
+                    "expansion_embeddings", cfg, [e["text"] for e in vec_exps]
+                )
             )
             embed_ms += (time.time() - t0) * 1000 - embed_ms
             if tagged_chunk_ids is not None:
@@ -306,6 +329,13 @@ def search_core(
             retrieve_k,
             cfg,
             tagged_ids=tagged_chunk_ids,
+        )
+        cost_items.append(
+            _embedding_cost_item(
+                "query_embeddings",
+                cfg,
+                [clean_query, hyde_passage] if hyde_passage else [clean_query],
+            )
         )
         vec_ms = (time.time() - t0) * 1000 - embed_ms
 
@@ -376,6 +406,7 @@ def search_core(
             }
             for i, r in enumerate(results)
         ],
+        "cost": cost_summary(cost_items),
     }
     if cfg.query_expand:
         out["expanded"] = bool(expansions)
@@ -468,7 +499,7 @@ def ask_core(
     _require_index(cfg)
 
     conn = connect(cfg)
-    client = OpenAI()
+    client = OpenAI() if openai_client_needed(cfg) else None
 
     clean_question, filters = parse_filters(question)
     has_filters = has_active_filters(filters)
@@ -548,15 +579,7 @@ def ask_core(
                 clean_question, client, cfg
             )
             if hyde_usage:
-                cost_items.append(
-                    _chat_cost_item(
-                        name="hyde",
-                        model=hyde_usage["model"],
-                        prompt_tokens=hyde_usage["prompt_tokens"],
-                        completion_tokens=hyde_usage["completion_tokens"],
-                        estimated_tokens=hyde_usage["estimated_tokens"],
-                    )
-                )
+                cost_items.append(_chat_cost_item(name="hyde", **hyde_usage))
 
         retrieve_k = max(cfg.rerank_fetch_k, top_k * 3)
 
@@ -692,7 +715,8 @@ def ask_core(
                 cost_items.append(
                     _chat_cost_item(
                         name="rerank",
-                        model=cfg.chat_model,
+                        model=rerank_info["model"],
+                        provider=rerank_info["provider"],
                         prompt_tokens=rerank_info["prompt_tokens"],
                         completion_tokens=rerank_info["completion_tokens"],
                     )
@@ -761,36 +785,25 @@ def ask_core(
 
     context = "\n\n".join(context_parts)
 
+    answer_system = (
+        "You answer questions based on the provided context from a personal knowledge base. "
+        "Be direct and concise. If the context doesn't contain enough information, say so. "
+        "Cite sources by their number [1], [2], etc. when referencing specific information."
+    )
+    answer_user = f"Context:\n{context}\n\n---\nQuestion: {clean_question}"
     t0 = time.time()
-    chat_resp = client.chat.completions.create(
+    answer, prompt_tokens, completion_tokens = complete(
+        cfg,
+        client,
         model=cfg.chat_model,
-        messages=[
-            {
-                "role": "system",
-                "content": (
-                    "You answer questions based on the provided context from a personal knowledge base. "
-                    "Be direct and concise. If the context doesn't contain enough information, say so. "
-                    "Cite sources by their number [1], [2], etc. when referencing specific information."
-                ),
-            },
-            {
-                "role": "user",
-                "content": f"Context:\n{context}\n\n---\nQuestion: {clean_question}",
-            },
-        ],
+        system=answer_system,
+        user=answer_user,
         temperature=0.3,
         max_tokens=1000,
     )
-    answer = chat_resp.choices[0].message.content
     gen_ms = (time.time() - t0) * 1000
-    tokens = chat_resp.usage
-    prompt_tokens, completion_tokens = usage_tokens(tokens)
     if prompt_tokens is None or completion_tokens is None:
-        prompt_tokens = estimate_tokens(
-            "You answer questions based on the provided context from a personal knowledge base. "
-            "Be direct and concise. If the context doesn't contain enough information, say so. "
-            "Cite sources by their number [1], [2], etc. when referencing specific information."
-        ) + estimate_tokens(f"Context:\n{context}\n\n---\nQuestion: {clean_question}")
+        prompt_tokens = estimate_tokens(answer_system) + estimate_tokens(answer_user)
         completion_tokens = estimate_tokens(answer or "")
         answer_tokens_estimated = True
     else:
@@ -799,6 +812,7 @@ def ask_core(
         _chat_cost_item(
             name="answer",
             model=cfg.chat_model,
+            provider=cfg.llm_provider,
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
             estimated_tokens=answer_tokens_estimated,
@@ -989,6 +1003,23 @@ def list_core(cfg: Config) -> dict:
         "doc_count": len(documents),
         "documents": documents,
     }
+
+
+def eval_core(
+    cfg: Config,
+    dataset: str = "scifact",
+    *,
+    modes: list[str] | str | None = None,
+    limit: int | None = None,
+    budget: float | None = None,
+    progress=None,
+) -> dict:
+    """Benchmark retrieval on a BEIR dataset under the eval spend cap (see kb.eval)."""
+    from .eval import run_eval  # lazy: kb.eval imports this module
+
+    return run_eval(
+        dataset, cfg, modes=modes, limit=limit, budget=budget, progress=progress
+    )
 
 
 # ---------------------------------------------------------------------------

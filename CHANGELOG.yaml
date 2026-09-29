@@ -1,4 +1,24 @@
 releases:
+  - version: "unreleased"
+    date: "2026-09-28"
+    summary: "Adds `kb eval` for benchmarking kb's retrieval pipeline on public BEIR datasets with a hard cumulative API spend cap, and lets LLM calls run on a ChatGPT subscription instead of an API key."
+    added:
+      - description: "`kb eval [dataset] [--mode fts,hybrid,rerank] [--limit N] [--budget USD] [--json]` scores FTS, hybrid, and reranked retrieval on BEIR (scifact, nfcorpus, arguana, fiqa, scidocs) using the shipped test qrels: nDCG@10 (graded), Recall@10, MRR@10, P@10, p50 latency, and USD per mode. Datasets, isolated eval indexes, and run reports live under `~/.local/share/kb/eval/`; the user's index is never touched"
+        commits: []
+      - description: "`eval_budget_usd` config (default `10.0`) caps cumulative eval API spend, tracked in `~/.local/share/kb/eval/spend.json`. Runs are refused up front when the estimated cost exceeds the remaining budget or an API model is unpriced, and stop early with a partial report before the cap would be crossed. Local methods cost $0"
+        commits: []
+      - description: "`llm_provider = \"chatgpt\"` sends HyDE, LLM query expansion, LLM rerank, and `kb ask` answers through the ChatGPT subscription's Codex backend using the read-only `codex login` credentials in `~/.codex/auth.json` (`$CODEX_HOME`); `llm_reasoning_effort` (default `\"low\"`) tunes it. These calls cost $0 in cost reports and the `kb eval` budget while still reporting tokens. Embeddings still use `embed_method`. Unofficial for third-party tools"
+        commits: []
+    fixed: []
+    changed:
+      - description: "`search_core` (and `kb search --json` / MCP `kb_search`) now include a `cost` summary: HyDE and LLM query-expansion token usage plus estimated query-embedding cost"
+        commits: []
+    removed: []
+    deprecated: []
+    breaking: []
+    migration: null
+    contributors: []
+
   - version: "1.3.0"
     date: "2026-05-18"
     summary: "Adds the `kb formats` command, improves `kb stats` output for larger indexes, and lets HyDE use a separate OpenAI-compatible provider. Also increases HyDE response budget and suppresses noisy Hugging Face Hub token warnings during local model loading."

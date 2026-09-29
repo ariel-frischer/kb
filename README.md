@@ -98,10 +98,29 @@ kb tags                        List all tags with document counts
 kb stats [--full]              Show index stats (--full for per-file details)
 kb formats                     Show supported document formats
 kb reset                       Drop DB and start fresh
+kb eval [dataset] [--mode fts,hybrid,rerank] [--limit N] [--budget USD] [--json]
+                               Benchmark retrieval on BEIR (default scifact, $10 spend cap)
 kb version                     Show version (also: kb v, kb --version)
 kb mcp                         Start MCP server (for Claude Desktop / AI agents)
 kb completion <shell>          Output shell completions (zsh, bash, fish)
 ```
+
+### Benchmarking retrieval (`kb eval`)
+
+`kb eval` scores kb's real retrieval pipeline on a public [BEIR](https://github.com/beir-cellar/beir) dataset using the relevance judgments (qrels, test split) that ship with it — no generated questions. Use it to measure whether a model or setting change actually helps.
+
+```bash
+kb eval                                  # scifact, modes fts + hybrid
+kb eval nfcorpus --mode fts,hybrid,rerank
+kb eval scifact --limit 50 --json        # first 50 queries, machine-readable report
+kb eval scifact --budget 2               # override the spend cap for this run
+```
+
+- **Datasets**: `scifact` (default), `nfcorpus`, `arguana`, `fiqa`, `scidocs`. Downloaded once from the UKP BEIR mirror (falls back to the Hugging Face `BeIR/*` mirror).
+- **Modes**: `fts` (keyword only), `hybrid` (`kb search` pipeline, honoring your HyDE / query-expansion settings), `rerank` (hybrid candidates reranked with your `rerank_method`).
+- **Metrics** @10: nDCG (graded), Recall, MRR, Precision, plus p50 latency and USD spent per mode.
+- **Isolation**: corpora, eval indexes, run reports, and the spend ledger live under `~/.local/share/kb/eval/`. Your own index is never read or written. Eval indexes are keyed by embedding model and chunk settings, so reruns reuse them for free.
+- **Spend cap**: API spend across all eval runs is tracked in `~/.local/share/kb/eval/spend.json` and capped by `eval_budget_usd` (default `10.0`; `--budget` overrides per run). A run is refused up front when its estimated cost (uncached corpus embeddings + per-query HyDE/expansion/rerank) exceeds the remaining budget, stops early with a partial report if actual spend approaches the cap, and is refused outright if an API model has no known price. Local methods (`embed_method = "local"`, `hyde_method = "local"`, `expand_method = "local"`, `rerank_method = "cross-encoder"`) cost $0, and so do LLM calls with `llm_provider = "chatgpt"` (their tokens are reported).
 
 ### Shell completions
 
@@ -141,6 +160,8 @@ sources = [
 # embed_dims = 1536
 # local_embed_model = "ibm-granite/granite-embedding-english-r2"  # or "Snowflake/snowflake-arctic-embed-m-v1.5"
 # chat_model = "gpt-4o-mini"
+# llm_provider = "openai"  # "openai" (API key) or "chatgpt" (ChatGPT subscription, see below)
+# llm_reasoning_effort = "low"  # reasoning effort for llm_provider = "chatgpt"
 # max_chunk_chars = 2000
 # search_threshold = 0.001      # min cosine similarity for `kb search` (also --threshold flag)
 # ask_threshold = 0.001         # min cosine similarity for `kb ask` (also --threshold flag)
@@ -160,6 +181,7 @@ sources = [
 # bm25_shortcut_min = 0.85 # min normalized BM25 for ask shortcut
 # bm25_shortcut_gap = 0.02 # min gap vs second doc for ask shortcut
 # index_code = false       # set true to also index source code files
+# eval_budget_usd = 10.0   # cumulative API spend cap for `kb eval`
 ```
 
 ### .kbignore
@@ -194,6 +216,21 @@ openai_api_key = "sk-..."
 ```
 
 Keys are loaded as uppercase environment variables. Existing env vars take precedence.
+
+### Using a ChatGPT subscription (no API key for LLM calls)
+
+Set `llm_provider = "chatgpt"` to send HyDE, LLM query expansion, LLM rerank, and `kb ask` answers through your ChatGPT subscription instead of the API:
+
+```toml
+llm_provider = "chatgpt"
+chat_model = "gpt-6-luna"        # a model your ChatGPT plan offers in Codex
+# llm_reasoning_effort = "low"
+embed_method = "local"           # embeddings are not available via ChatGPT login
+```
+
+kb reuses the login from the [Codex CLI](https://github.com/openai/codex): run `codex login` once, and kb reads `~/.codex/auth.json` (or `$CODEX_HOME/auth.json`). kb never refreshes or writes that file; when the token expires, run any `codex` command (or `codex login`) and retry. Calls through this provider cost $0 in kb's cost reports and `kb eval` budget (tokens are still reported). A `hyde_base_url` override keeps HyDE on that OpenAI-compatible endpoint.
+
+Note: this uses the ChatGPT subscription's Codex backend (`chatgpt.com/backend-api/codex`), which is not an official API for third-party tools and may change without notice.
 
 ## Search Filters
 

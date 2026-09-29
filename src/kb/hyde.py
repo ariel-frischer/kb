@@ -16,7 +16,8 @@ import warnings
 from openai import OpenAI
 
 from .config import Config
-from .cost import estimate_tokens, usage_tokens
+from .cost import estimate_tokens
+from .llm import complete, hyde_provider
 
 log = logging.getLogger(__name__)
 
@@ -24,6 +25,7 @@ _SYSTEM_PROMPT = (
     "Given a search query, write a short passage (100-200 words) that would directly "
     "answer the query. Write as if from an authoritative document. No preamble."
 )
+HYDE_MAX_TOKENS = 300
 
 # Lazy-loaded local model cache (same pattern as expand.py _expand_model_cache)
 _hyde_model_cache: dict[str, tuple] = {}
@@ -131,7 +133,7 @@ def _resolve_key(value: str) -> str:
     return value
 
 
-def _hyde_client(client: OpenAI, cfg: Config) -> OpenAI:
+def _hyde_client(client: OpenAI | None, cfg: Config) -> OpenAI | None:
     """Return a dedicated OpenAI client for HyDE if base_url/api_key are configured."""
     if not cfg.hyde_base_url:
         return client
@@ -142,78 +144,61 @@ def _hyde_client(client: OpenAI, cfg: Config) -> OpenAI:
 
 
 def llm_hyde_passage(
-    query: str, client: OpenAI, cfg: Config
+    query: str, client: OpenAI | None, cfg: Config
 ) -> tuple[str | None, float]:
-    """Generate a hypothetical passage via OpenAI API."""
-    model = cfg.hyde_model or cfg.chat_model
-    hyde_cl = _hyde_client(client, cfg)
-    t0 = time.time()
-    try:
-        resp = hyde_cl.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": _SYSTEM_PROMPT},
-                {"role": "user", "content": query},
-            ],
-            temperature=0.7,
-            max_tokens=300,
-        )
-        passage = (resp.choices[0].message.content or "").strip()
-        elapsed = (time.time() - t0) * 1000
-        if not passage:
-            log.warning("HyDE: empty response from %s", model)
-            return None, elapsed
-        return passage, elapsed
-    except Exception:
-        elapsed = (time.time() - t0) * 1000
-        log.warning("HyDE: failed to generate passage", exc_info=True)
-        return None, elapsed
+    """Generate a hypothetical passage via the configured LLM provider."""
+    passage, elapsed, _usage = llm_hyde_passage_with_usage(query, client, cfg)
+    return passage, elapsed
 
 
 def llm_hyde_passage_with_usage(
-    query: str, client: OpenAI, cfg: Config
+    query: str, client: OpenAI | None, cfg: Config
 ) -> tuple[str | None, float, dict | None]:
     """Generate a HyDE passage and include token metadata when available."""
+    from .api import KBError  # api imports hyde; import lazily to avoid a cycle
+
     model = cfg.hyde_model or cfg.chat_model
-    hyde_cl = _hyde_client(client, cfg)
+    provider = hyde_provider(cfg)
     t0 = time.time()
     try:
-        messages = [
-            {"role": "system", "content": _SYSTEM_PROMPT},
-            {"role": "user", "content": query},
-        ]
-        resp = hyde_cl.chat.completions.create(
+        text, prompt_tokens, completion_tokens = complete(
+            cfg,
+            _hyde_client(client, cfg),
             model=model,
-            messages=messages,
+            system=_SYSTEM_PROMPT,
+            user=query,
             temperature=0.7,
-            max_tokens=300,
+            max_tokens=HYDE_MAX_TOKENS,
+            provider=provider,
         )
-        passage = (resp.choices[0].message.content or "").strip()
-        elapsed = (time.time() - t0) * 1000
-        if not passage:
-            log.warning("HyDE: empty response from %s", model)
-            return None, elapsed, None
-
-        prompt_tokens, completion_tokens = usage_tokens(getattr(resp, "usage", None))
-        estimated = False
-        if prompt_tokens is None or completion_tokens is None:
-            prompt_tokens = estimate_tokens(_SYSTEM_PROMPT) + estimate_tokens(query)
-            completion_tokens = estimate_tokens(passage)
-            estimated = True
-        return (
-            passage,
-            elapsed,
-            {
-                "model": model,
-                "prompt_tokens": prompt_tokens,
-                "completion_tokens": completion_tokens,
-                "estimated_tokens": estimated,
-            },
-        )
+    except KBError:
+        raise
     except Exception:
         elapsed = (time.time() - t0) * 1000
         log.warning("HyDE: failed to generate passage", exc_info=True)
         return None, elapsed, None
+    passage = text.strip()
+    elapsed = (time.time() - t0) * 1000
+    if not passage:
+        log.warning("HyDE: empty response from %s", model)
+        return None, elapsed, None
+
+    estimated = False
+    if prompt_tokens is None or completion_tokens is None:
+        prompt_tokens = estimate_tokens(_SYSTEM_PROMPT) + estimate_tokens(query)
+        completion_tokens = estimate_tokens(passage)
+        estimated = True
+    return (
+        passage,
+        elapsed,
+        {
+            "model": model,
+            "provider": provider,
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
+            "estimated_tokens": estimated,
+        },
+    )
 
 
 def generate_hyde_passage(

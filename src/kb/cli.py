@@ -15,6 +15,7 @@ from .api import (
     NoSearchTermsError,
     _resolve_doc_path,
     ask_core,
+    eval_core,
     feedback_core,
     fts_core,
     list_core,
@@ -68,6 +69,8 @@ Usage:
   kb stats [--full]              Show index statistics
   kb formats                     Show supported document formats
   kb reset                       Drop database and start fresh
+  kb eval [dataset] [--mode fts,hybrid,rerank] [--limit N] [--budget USD] [--json]
+                                 Benchmark retrieval on BEIR (default scifact, $10 spend cap)
   kb version                      Show version (also: kb v, kb --version)
   kb feedback "msg" [--tool T] [--severity bug|suggestion|note] [--context C] [--agent-id A] [--error-trace E]
                                  Submit feedback (for agents / dev use)
@@ -901,6 +904,138 @@ def cmd_list(cfg: Config, full: bool = False):
     print(style("\nUse 'kb list --full' for per-file details.", "muted"))
 
 
+EVAL_USAGE = (
+    "Usage: kb eval [dataset] [--mode fts,hybrid,rerank] [--limit N] "
+    "[--budget USD] [--json]"
+)
+
+
+def _parse_eval_args(args: list[str]) -> dict:
+    """Parse `kb eval` arguments. Raises ValueError on bad input."""
+    opts: dict = {"dataset": "scifact", "modes": None, "limit": None, "budget": None}
+    opts["json"] = "--json" in args
+    rest = [a for a in args if a != "--json"]
+    positional: list[str] = []
+    i = 0
+    while i < len(rest):
+        arg = rest[i]
+        if arg in ("--mode", "--modes", "--limit", "--budget"):
+            if i + 1 >= len(rest):
+                raise ValueError(f"{arg} requires a value")
+            value = rest[i + 1]
+            if arg == "--limit":
+                opts["limit"] = int(value)
+            elif arg == "--budget":
+                opts["budget"] = float(value)
+            else:
+                opts["modes"] = value
+            i += 2
+            continue
+        if arg.startswith("--"):
+            raise ValueError(f"Unknown option: {arg}")
+        positional.append(arg)
+        i += 1
+    if len(positional) > 1:
+        raise ValueError("Only one dataset per run")
+    if positional:
+        opts["dataset"] = positional[0]
+    return opts
+
+
+def cmd_eval(cfg: Config, args: list[str]):
+    """Benchmark retrieval on a BEIR dataset with a cumulative API spend cap."""
+    try:
+        opts = _parse_eval_args(args)
+    except ValueError as e:
+        print_error(str(e))
+        print(EVAL_USAGE)
+        sys.exit(1)
+
+    def progress(message: str) -> None:
+        print(style(message, "muted"), file=sys.stderr if opts["json"] else sys.stdout)
+
+    try:
+        result = eval_core(
+            cfg,
+            opts["dataset"],
+            modes=opts["modes"],
+            limit=opts["limit"],
+            budget=opts["budget"],
+            progress=progress,
+        )
+    except KBError as e:
+        print_error(str(e))
+        sys.exit(1)
+
+    if opts["json"]:
+        print(json.dumps(result, ensure_ascii=False))
+        return
+
+    k = result["k"]
+    pipeline = result["config"]
+    print()
+    print(
+        label(
+            "Dataset",
+            f"{result['dataset']} ({result['split']}) · "
+            f"{result['queries_selected']}/{result['queries_total']} queries · "
+            f"{result['corpus_docs']} docs · k={k}",
+        )
+    )
+    print(
+        label(
+            "Pipeline",
+            f"embed={pipeline['embed_method']} ({pipeline['embed_model']}) · "
+            f"hyde={pipeline['hyde']} · expand={pipeline['query_expand']} · "
+            f"rerank={pipeline['rerank_method']}",
+        )
+    )
+    print()
+    header = (
+        f"{'mode':<8} {'nDCG@' + str(k):>8} {'Recall@' + str(k):>10} "
+        f"{'MRR@' + str(k):>8} {'P@' + str(k):>7} {'queries':>8} {'p50 ms':>7} "
+        f"{'USD':>10}"
+    )
+    print(style(header, "heading"))
+    for mode, m in result["metrics"].items():
+        print(
+            f"{mode:<8} {m[f'ndcg@{k}']:>8.4f} {m[f'recall@{k}']:>10.4f} "
+            f"{m[f'mrr@{k}']:>8.4f} {m[f'p@{k}']:>7.4f} {m['queries']:>8} "
+            f"{m['latency_p50_ms']:>7} {format_usd(m['usd']):>10}"
+        )
+    print()
+
+    spend = result["spend"]
+    if result["budget_exhausted"]:
+        print(
+            style(
+                "Budget reached: stopped early, metrics cover evaluated queries only.",
+                "warning",
+            )
+        )
+    print(
+        label(
+            "Spend",
+            f"run {format_usd(spend['run_usd'])} "
+            f"(index {format_usd(spend['index_usd'])}) · "
+            f"ledger {format_usd(spend['ledger_total_usd'])} of "
+            f"${spend['budget_usd']:.2f} budget · "
+            f"remaining {format_usd(max(spend['remaining_usd'], 0.0))}",
+        )
+    )
+    tokens = spend["llm_tokens"]
+    if tokens["prompt"] or tokens["completion"]:
+        provider = result["config"]["llm_provider"]
+        note = " (ChatGPT subscription, $0)" if provider == "chatgpt" else ""
+        print(
+            label(
+                "LLM tokens",
+                f"{tokens['prompt']} in / {tokens['completion']} out{note}",
+            )
+        )
+    print(label("Report", style(result["report_path"], "path")))
+
+
 def cmd_feedback(args: list[str]):
     """Submit or list feedback entries."""
     if "--list" in args:
@@ -986,7 +1121,7 @@ def cmd_feedback(args: list[str]):
 def cmd_completion(shell: str):
     subcommands = (
         "init add remove sources index allow search fts ask similar "
-        "tag untag tags stats formats reset list feedback version mcp completion"
+        "tag untag tags stats formats reset list eval feedback version mcp completion"
     )
 
     if shell == "zsh":
@@ -1026,6 +1161,9 @@ _kb() {{
       fts)
         COMPREPLY=( $(compgen -W "--json --csv --md" -- "$cur") )
         ;;
+      eval)
+        COMPREPLY=( $(compgen -W "scifact nfcorpus arguana fiqa scidocs --mode --limit --budget --json" -- "$cur") )
+        ;;
       completion)
         COMPREPLY=( $(compgen -W "zsh bash fish" -- "$cur") )
         ;;
@@ -1053,6 +1191,10 @@ complete -F _kb kb"""
         )
         print(
             "complete -c kb -n '__fish_seen_subcommand_from fts' -a '--json --csv --md'"
+        )
+        print(
+            "complete -c kb -n '__fish_seen_subcommand_from eval' "
+            "-a 'scifact nfcorpus arguana fiqa scidocs --mode --limit --budget --json'"
         )
         print(
             "complete -c kb -n '__fish_seen_subcommand_from completion' "
@@ -1270,6 +1412,24 @@ def main():
             print("Usage: kb formats")
             sys.exit(0)
         cmd_formats(cfg)
+    elif cmd == "eval":
+        if sub_help:
+            print(EVAL_USAGE)
+            print()
+            print(
+                "Scores kb retrieval on a public BEIR dataset using its shipped qrels."
+            )
+            print("Datasets: scifact (default), nfcorpus, arguana, fiqa, scidocs")
+            print("Modes: fts, hybrid, rerank (default: fts,hybrid)")
+            print(
+                "Cumulative API spend is capped by eval_budget_usd (default $10) or "
+                "--budget; local methods cost $0."
+            )
+            print(
+                "Data, indexes, reports, and the spend ledger: ~/.local/share/kb/eval/"
+            )
+            sys.exit(0)
+        cmd_eval(cfg, args[1:])
     elif cmd == "reset":
         if sub_help:
             print("Usage: kb reset")

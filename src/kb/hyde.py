@@ -24,6 +24,7 @@ _SYSTEM_PROMPT = (
     "Given a search query, write a short passage (100-200 words) that would directly "
     "answer the query. Write as if from an authoritative document. No preamble."
 )
+HYDE_MAX_TOKENS = 300
 
 # Lazy-loaded local model cache (same pattern as expand.py _expand_model_cache)
 _hyde_model_cache: dict[str, tuple] = {}
@@ -156,7 +157,7 @@ def llm_hyde_passage(
                 {"role": "user", "content": query},
             ],
             temperature=0.7,
-            max_tokens=300,
+            max_tokens=HYDE_MAX_TOKENS,
         )
         passage = (resp.choices[0].message.content or "").strip()
         elapsed = (time.time() - t0) * 1000
@@ -186,7 +187,7 @@ def llm_hyde_passage_with_usage(
             model=model,
             messages=messages,
             temperature=0.7,
-            max_tokens=300,
+            max_tokens=HYDE_MAX_TOKENS,
         )
         passage = (resp.choices[0].message.content or "").strip()
         elapsed = (time.time() - t0) * 1000

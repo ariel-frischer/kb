@@ -71,6 +71,9 @@ sources = [
 # Size guard
 # max_file_size_mb = 10             # skip files larger than this during indexing
 # allowed_large_files = []          # paths that bypass the size limit
+
+# Benchmarks (`kb eval`)
+# eval_budget_usd = 10.0            # cumulative API spend cap across all eval runs
 """
 
 GLOBAL_CONFIG_TEMPLATE = """\
@@ -115,6 +118,9 @@ sources = [
 # Size guard
 # max_file_size_mb = 10             # skip files larger than this during indexing
 # allowed_large_files = []          # paths that bypass the size limit
+
+# Benchmarks (`kb eval`)
+# eval_budget_usd = 10.0            # cumulative API spend cap across all eval runs
 """
 
 # Keep old name as alias for backward compat in imports
@@ -154,6 +160,7 @@ class Config:
     expand_model: str = "google/flan-t5-small"  # model for local expand method
     bm25_shortcut_min: float = 0.85  # min top-doc norm for BM25 shortcut
     bm25_shortcut_gap: float = 0.02  # min gap vs second-doc for BM25 shortcut
+    eval_budget_usd: float = 10.0  # cumulative API spend cap for `kb eval`
 
     scope: str = "project"  # "global" or "project"
 

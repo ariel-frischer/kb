@@ -18,7 +18,7 @@ from .cost import (
 )
 from .db import connect
 from .embed import deserialize_f32, embed_batch, serialize_f32
-from .expand import expand_query
+from .expand import expand_query, expand_query_with_usage
 from .filters import (
     apply_filters,
     get_tagged_chunk_ids,
@@ -26,7 +26,7 @@ from .filters import (
     parse_filters,
     remove_tag_filter,
 )
-from .hyde import generate_hyde_passage, generate_hyde_passage_with_usage
+from .hyde import generate_hyde_passage_with_usage
 from .rerank import rerank
 from .search import (
     fill_fts_only_results,
@@ -215,8 +215,13 @@ def search_core(
     hyde_ms = 0.0
     expand_ms = 0.0
     expansions: list[dict] = []
+    cost_items: list[dict] = []
     if cfg.hyde_enabled:
-        hyde_passage, hyde_ms = generate_hyde_passage(clean_query, client, cfg)
+        hyde_passage, hyde_ms, hyde_usage = generate_hyde_passage_with_usage(
+            clean_query, client, cfg
+        )
+        if hyde_usage:
+            cost_items.append(_chat_cost_item(name="hyde", **hyde_usage))
 
     has_threshold = cfg.search_threshold > 0
     retrieve_k = (top_k * 5) if has_filters else (top_k * 3)
@@ -228,7 +233,11 @@ def search_core(
         retrieve_k = max(retrieve_k, len(tagged_chunk_ids) + top_k)
 
     if cfg.query_expand:
-        expansions, expand_ms = expand_query(client, clean_query, cfg)
+        expansions, expand_ms, expand_usage = expand_query_with_usage(
+            client, clean_query, cfg
+        )
+        if expand_usage:
+            cost_items.append(_chat_cost_item(name="expand", **expand_usage))
         lex_exps = [e for e in expansions if e["type"] == "lex"]
         vec_exps = [e for e in expansions if e["type"] == "vec"]
 
@@ -243,11 +252,23 @@ def search_core(
             cfg,
             tagged_ids=tagged_chunk_ids,
         )
+        cost_items.append(
+            _embedding_cost_item(
+                "query_embeddings",
+                cfg,
+                [clean_query, hyde_passage] if hyde_passage else [clean_query],
+            )
+        )
 
         # Batch embed vec expansions (separate call)
         if vec_exps:
             exp_embeddings = embed_batch(
                 client, [e["text"] for e in vec_exps], cfg, is_query=True
+            )
+            cost_items.append(
+                _embedding_cost_item(
+                    "expansion_embeddings", cfg, [e["text"] for e in vec_exps]
+                )
             )
             embed_ms += (time.time() - t0) * 1000 - embed_ms
             if tagged_chunk_ids is not None:
@@ -306,6 +327,13 @@ def search_core(
             retrieve_k,
             cfg,
             tagged_ids=tagged_chunk_ids,
+        )
+        cost_items.append(
+            _embedding_cost_item(
+                "query_embeddings",
+                cfg,
+                [clean_query, hyde_passage] if hyde_passage else [clean_query],
+            )
         )
         vec_ms = (time.time() - t0) * 1000 - embed_ms
 
@@ -376,6 +404,7 @@ def search_core(
             }
             for i, r in enumerate(results)
         ],
+        "cost": cost_summary(cost_items),
     }
     if cfg.query_expand:
         out["expanded"] = bool(expansions)
@@ -989,6 +1018,23 @@ def list_core(cfg: Config) -> dict:
         "doc_count": len(documents),
         "documents": documents,
     }
+
+
+def eval_core(
+    cfg: Config,
+    dataset: str = "scifact",
+    *,
+    modes: list[str] | str | None = None,
+    limit: int | None = None,
+    budget: float | None = None,
+    progress=None,
+) -> dict:
+    """Benchmark retrieval on a BEIR dataset under the eval spend cap (see kb.eval)."""
+    from .eval import run_eval  # lazy: kb.eval imports this module
+
+    return run_eval(
+        dataset, cfg, modes=modes, limit=limit, budget=budget, progress=progress
+    )
 
 
 # ---------------------------------------------------------------------------

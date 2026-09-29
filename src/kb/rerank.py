@@ -12,6 +12,14 @@ from .config import Config
 # Lazy-loaded cross-encoder model cache
 _cross_encoder_cache: dict[str, object] = {}
 
+RERANK_SYSTEM_PROMPT = (
+    "You are a relevance ranking assistant. Given a question and numbered passages, "
+    "rank the passages by relevance to the question. Output ONLY a comma-separated "
+    "list of passage numbers from most to least relevant. Example: 3,7,1,5,2,4,6"
+)
+RERANK_PASSAGE_CHARS = 500
+RERANK_MAX_TOKENS = 200
+
 
 def rerank(
     client: OpenAI | None,
@@ -37,7 +45,7 @@ def llm_rerank(
 
     passages = []
     for i, r in enumerate(results):
-        text = (r.get("text") or "")[:500]
+        text = (r.get("text") or "")[:RERANK_PASSAGE_CHARS]
         source = r.get("doc_path") or "unknown"
         heading = r.get("heading") or ""
         label = source
@@ -51,21 +59,14 @@ def llm_rerank(
     resp = client.chat.completions.create(
         model=cfg.chat_model,
         messages=[
-            {
-                "role": "system",
-                "content": (
-                    "You are a relevance ranking assistant. Given a question and numbered passages, "
-                    "rank the passages by relevance to the question. Output ONLY a comma-separated "
-                    "list of passage numbers from most to least relevant. Example: 3,7,1,5,2,4,6"
-                ),
-            },
+            {"role": "system", "content": RERANK_SYSTEM_PROMPT},
             {
                 "role": "user",
                 "content": f"Question: {question}\n\nPassages:\n{passages_text}\n\nRanking:",
             },
         ],
         temperature=0,
-        max_tokens=200,
+        max_tokens=RERANK_MAX_TOKENS,
     )
     ranking_text = resp.choices[0].message.content.strip()
     rerank_ms = (time.time() - t0) * 1000

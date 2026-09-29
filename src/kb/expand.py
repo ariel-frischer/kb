@@ -14,6 +14,7 @@ import warnings
 from openai import OpenAI
 
 from .config import Config
+from .cost import estimate_tokens, usage_tokens
 
 log = logging.getLogger(__name__)
 
@@ -28,6 +29,7 @@ Rules:
 - Do not repeat the original query
 Query: "{query}"\
 """
+EXPAND_MAX_TOKENS = 200
 
 
 def expand_query(client: OpenAI, query: str, cfg: Config) -> tuple[list[dict], float]:
@@ -41,23 +43,63 @@ def expand_query(client: OpenAI, query: str, cfg: Config) -> tuple[list[dict], f
     return result, elapsed
 
 
+def expand_query_with_usage(
+    client: OpenAI, query: str, cfg: Config
+) -> tuple[list[dict], float, dict | None]:
+    """Like expand_query, plus LLM token usage metadata (None for local expansion)."""
+    t0 = time.time()
+    usage = None
+    if cfg.expand_method == "llm":
+        result, usage = llm_expand_with_usage(client, query, cfg)
+    else:
+        result = local_expand(query, cfg)
+    elapsed = (time.time() - t0) * 1000
+    return result, elapsed, usage
+
+
 def llm_expand(client: OpenAI, query: str, cfg: Config) -> list[dict]:
     """OpenAI API expansion with JSON mode."""
+    return llm_expand_with_usage(client, query, cfg)[0]
+
+
+def llm_expand_with_usage(
+    client: OpenAI, query: str, cfg: Config
+) -> tuple[list[dict], dict | None]:
+    """OpenAI API expansion plus token usage (None when the request failed)."""
+    prompt = _LLM_PROMPT.format(query=query)
     try:
         resp = client.chat.completions.create(
             model=cfg.chat_model,
             messages=[
-                {"role": "user", "content": _LLM_PROMPT.format(query=query)},
+                {"role": "user", "content": prompt},
             ],
             response_format={"type": "json_object"},
             temperature=0.7,
-            max_tokens=200,
+            max_tokens=EXPAND_MAX_TOKENS,
         )
         text = (resp.choices[0].message.content or "").strip()
+    except Exception:
+        log.warning("Query expansion (LLM) failed", exc_info=True)
+        return [], None
+
+    prompt_tokens, completion_tokens = usage_tokens(getattr(resp, "usage", None))
+    estimated = False
+    if prompt_tokens is None or completion_tokens is None:
+        prompt_tokens = estimate_tokens(prompt)
+        completion_tokens = estimate_tokens(text)
+        estimated = True
+    usage = {
+        "model": cfg.chat_model,
+        "prompt_tokens": prompt_tokens,
+        "completion_tokens": completion_tokens,
+        "estimated_tokens": estimated,
+    }
+
+    try:
         data = json.loads(text)
     except Exception:
         log.warning("Query expansion (LLM) failed", exc_info=True)
-        return []
+        return [], usage
 
     results = []
     query_lower = query.lower().strip()
@@ -67,7 +109,7 @@ def llm_expand(client: OpenAI, query: str, cfg: Config) -> list[dict]:
     for variant in data.get("vec", []):
         if isinstance(variant, str) and variant.lower().strip() != query_lower:
             results.append({"type": "vec", "text": variant})
-    return results
+    return results, usage
 
 
 def _get_t5_model(model_name: str):

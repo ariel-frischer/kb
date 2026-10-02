@@ -8,20 +8,20 @@ CLI RAG tool for your docs. Index 30+ document formats (markdown, PDF, DOCX, EPU
 ## Features
 
 - **Hybrid search** — vector similarity + FTS5 keyword search, fused with Reciprocal Rank Fusion (with rank bonuses)
-- **HyDE best-of-two** — generates a hypothetical answer passage, embeds both it and the raw query, keeps whichever vec result set is better (local via transformers or LLM API; enabled by default, can only help never hurt)
+- **HyDE best-of-two** — generates a hypothetical answer passage, embeds both it and the raw query, keeps whichever vec result set has the better top match (local via transformers or LLM API; enabled by default)
 - **Keyword-only search** — `kb fts` for instant BM25 results with zero API cost (match-any terms ranked by BM25, stopwords skipped; truncated filepath matches weighted 10x, headings 2x)
 - **Heading-aware chunking** — markdown split by heading hierarchy, each chunk carries ancestry
-- **Incremental indexing** — content-hash per chunk, only re-embeds changes
+- **Incremental indexing** — content-hash per chunk, only re-embeds changes. Deleted or newly ignored files stay in the index until `kb reset && kb index`
 - **Query expansion** — generates keyword synonyms (for FTS) and semantic rephrasings (for vector search) via a local Qwen3 model or LLM, fuses all result lists with multi-list weighted RRF (`--expand`)
 - **Reranking** — `ask` over-fetches candidates, reranks by relevance (local cross-encoder or LLM), keeps the best
 - **Pre-search filters** — file globs, document type, tags, date ranges, keyword inclusion/exclusion
-- **Document tagging** — manual tags via `kb tag`, auto-parsed from markdown frontmatter
+- **Document tagging** — manual tags via `kb tag`, auto-parsed from markdown frontmatter. `kb tag` tags are replaced by the frontmatter tags when the file's text changes, so use frontmatter for tags that should stick
 - **Similar documents** — find related docs using stored embeddings (no API call)
 - **30+ formats** — markdown, PDF, DOCX, PPTX, XLSX, EPUB, HTML, ODT, ODS, ODP, RTF, email (.eml), subtitles (.srt/.vtt), and plain text variants (.txt, .rst, .org, .csv, .json, .yaml, .tex, etc.)
 - **Optional code indexing** — set `index_code = true` to also index source code files (.py, .js, .ts, .go, .rs, etc.)
 - **Local or API embeddings** — local via `ibm-granite/granite-embedding-english-r2` (sentence-transformers, no API cost, fully offline, auto-detected dims) or OpenAI API — config-driven switch
 - **Pluggable chunking** — uses [chonkie](https://github.com/bhavnicksm/chonkie) when available, regex fallback otherwise
-- **Built-in benchmarks** — `kb eval` scores retrieval on public BEIR datasets with a hard API spend cap
+- **Built-in benchmarks** — `kb eval` scores retrieval on public BEIR datasets with an API spend cap
 - **ChatGPT subscription support** — `llm_provider = "chatgpt"` runs LLM steps on your ChatGPT plan via the Codex login, no API key
 - **MCP server** — expose kb as tools for Claude Desktop, Claude Code, and other MCP clients
 
@@ -87,10 +87,11 @@ kb init --project              Create project-local .kb.toml in current director
 kb add <dir> [dir...]          Add source directories
 kb remove <dir> [dir...]       Remove source directories
 kb sources                     List configured sources
-kb index [DIR...]              Index sources from config (or explicit dirs)
-kb search "query" [k] [--threshold N] [--expand] [--json|--csv|--md]  Hybrid search (default k=5)
+kb index [DIR...] [--no-size-limit]  Index sources from config (or explicit dirs); skips files > max_file_size_mb
+kb allow <file>                Whitelist a large file for indexing
+kb search "query" [k] [--threshold N] [--expand|--no-expand] [--json|--csv|--md]  Hybrid search (default k=5)
 kb fts "query" [k] [--json|--csv|--md]            Keyword-only search (instant, no API cost)
-kb ask "question" [k] [--threshold N] [--expand] [--json|--csv|--md]  RAG answer (default k=8, BM25 shortcut when confident)
+kb ask "question" [k] [--threshold N] [--expand|--no-expand] [--json|--csv|--md]  RAG answer (default k=8, BM25 shortcut when confident)
 kb list                        Summary of indexed documents by type
 kb list --full                 List every indexed document with metadata
 kb similar <file> [k]          Find similar documents (no API call, default k=10)
@@ -103,6 +104,7 @@ kb reset                       Drop DB and start fresh
 kb eval [dataset] [--mode fts,hybrid,rerank] [--limit N] [--budget USD] [--json]
                                Benchmark retrieval on BEIR (default scifact, $10 spend cap)
 kb version                     Show version (also: kb v, kb --version)
+kb feedback "msg" [--severity bug|suggestion|note]  Submit feedback (for agents; --list to view)
 kb mcp                         Start MCP server (for Claude Desktop / AI agents)
 kb completion <shell>          Output shell completions (zsh, bash, fish)
 ```

@@ -223,7 +223,9 @@ class TestCmdSearch:
         populated_db.query_expand = True
         populated_db.rerank_method = "cross-encoder"
         with (
-            patch("kb.api.OpenAI", side_effect=AssertionError("unexpected OpenAI client")),
+            patch(
+                "kb.api.OpenAI", side_effect=AssertionError("unexpected OpenAI client")
+            ),
             patch("kb.embed.local_embed_batch", return_value=[[0.1] * 4] * 2),
             patch("kb.hyde.local_hyde_passage", return_value=("Install kb.", 0.0)),
             patch("kb.expand.local_expand", return_value=[]),

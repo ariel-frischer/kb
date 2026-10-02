@@ -235,7 +235,11 @@ class TestRouting:
             ({"embed_method": "openai"}, False, True),
             ({"hyde_method": "llm"}, False, True),
             ({"hyde_method": "llm", "hyde_enabled": False}, False, False),
-            ({"hyde_method": "llm", "hyde_base_url": "http://localhost/v1"}, False, False),
+            (
+                {"hyde_method": "llm", "hyde_base_url": "http://localhost/v1"},
+                False,
+                False,
+            ),
             ({"expand_method": "llm"}, False, True),
             ({"expand_method": "llm", "query_expand": False}, False, False),
             ({"rerank_method": "llm"}, False, False),

@@ -226,6 +226,38 @@ class TestRouting:
         assert llm.openai_client_needed(_chatgpt_cfg(embed_method="openai"))
         assert llm.openai_client_needed(Config(embed_method="local"))
 
+    @pytest.mark.parametrize(
+        ("overrides", "include_answer", "needed"),
+        [
+            ({}, False, False),
+            ({}, True, True),
+            ({"llm_provider": "chatgpt"}, True, False),
+            ({"embed_method": "openai"}, False, True),
+            ({"hyde_method": "llm"}, False, True),
+            ({"hyde_method": "llm", "hyde_enabled": False}, False, False),
+            (
+                {"hyde_method": "llm", "hyde_base_url": "http://localhost/v1"},
+                False,
+                False,
+            ),
+            ({"expand_method": "llm"}, False, True),
+            ({"expand_method": "llm", "query_expand": False}, False, False),
+            ({"rerank_method": "llm"}, False, False),
+        ],
+    )
+    def test_local_client_requirements(self, overrides, include_answer, needed):
+        cfg = Config(
+            **{
+                "embed_method": "local",
+                "hyde_method": "local",
+                "expand_method": "local",
+                "query_expand": True,
+                "rerank_method": "cross-encoder",
+                **overrides,
+            }
+        )
+        assert llm.openai_client_needed(cfg, include_answer=include_answer) is needed
+
     def test_chatgpt_hyde_costs_zero_but_keeps_tokens(self, codex_home):
         _write_auth(codex_home)
         fake = MagicMock()

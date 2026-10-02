@@ -105,9 +105,24 @@ def hyde_provider(cfg: Config) -> str:
     return OPENAI if cfg.hyde_base_url else cfg.llm_provider
 
 
-def openai_client_needed(cfg: Config) -> bool:
-    """Whether a default OpenAI API-key client is needed (embeddings or LLM calls)."""
-    return cfg.embed_method != "local" or cfg.llm_provider != CHATGPT
+def openai_client_needed(cfg: Config, *, include_answer: bool = False) -> bool:
+    """Whether search (or ask) needs the default OpenAI API-key client.
+
+    HyDE with its own base URL constructs a separate client. Search does not
+    rerank or generate an answer; ask's answer always uses llm_provider.
+    """
+    return cfg.embed_method != "local" or (
+        cfg.llm_provider == OPENAI
+        and (
+            include_answer
+            or (
+                cfg.hyde_enabled
+                and cfg.hyde_method != "local"
+                and not cfg.hyde_base_url
+            )
+            or (cfg.query_expand and cfg.expand_method == "llm")
+        )
+    )
 
 
 def _chatgpt_client() -> OpenAI:

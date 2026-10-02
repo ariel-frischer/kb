@@ -1278,7 +1278,7 @@ def main():
 
     scope_label = f"[{cfg.scope}]" if cfg.config_path else "[no config]"
     if cfg.config_path:
-        print(f"Config: {cfg.config_path} {scope_label}")
+        print(f"Config: {cfg.config_path} {scope_label}", file=sys.stderr)
 
     # Per-subcommand help
     sub_help = len(args) > 1 and args[1] in ("-h", "--help")

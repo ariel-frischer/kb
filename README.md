@@ -47,7 +47,7 @@ uv tool install --from "git+https://github.com/ariel-frischer/kb.git" "kb[expand
 uv tool install --from "git+https://github.com/ariel-frischer/kb.git" "kb[local-llm]" # + local HyDE generation (transformers + torch)
 ```
 
-**Runs fully local — no API keys required.** Set `embed_method = "local"` in config (see [Configuration](#configuration)) and use local backends for HyDE (`hyde_method = "local"`), reranking (`rerank_method = "cross-encoder"`), and query expansion (`expand_method = "local"`). Only `kb ask` needs an LLM for the final answer — point it at a local model via Ollama or similar.
+**Index and search fully locally — no API keys required.** Set `embed_method = "local"` in config (see [Configuration](#configuration)) and use local backends for HyDE (`hyde_method = "local"`), reranking (`rerank_method = "cross-encoder"`), and query expansion (`expand_method = "local"`). Only `kb ask` needs an LLM for the final answer — point it at a local model via Ollama or similar (set `OPENAI_BASE_URL` and a placeholder `OPENAI_API_KEY`, e.g. `ollama`, for the OpenAI client).
 
 For cloud, the defaults work with any OpenAI-compatible API. Set `OPENAI_API_KEY` in your environment (or in `~/.config/kb/secrets.toml`). Recommended cloud models: `text-embedding-3-small` for embeddings, `gpt-6-luna` for chat/ask. Works with any provider that speaks the OpenAI API — set `OPENAI_BASE_URL` to point at Ollama, LiteLLM, vLLM, etc.
 

@@ -143,7 +143,7 @@ def _embedding_cost_item(name: str, cfg: Config, texts: list[str]) -> dict:
 
 def _pick_best_vec(
     conn: sqlite3.Connection,
-    client: OpenAI,
+    client: OpenAI | None,
     query: str,
     hyde_passage: str | None,
     retrieve_k: int,
@@ -499,7 +499,7 @@ def ask_core(
     _require_index(cfg)
 
     conn = connect(cfg)
-    client = OpenAI() if openai_client_needed(cfg) else None
+    client = OpenAI() if openai_client_needed(cfg, include_answer=True) else None
 
     clean_question, filters = parse_filters(question)
     has_filters = has_active_filters(filters)

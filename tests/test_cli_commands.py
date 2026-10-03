@@ -1,5 +1,6 @@
 """Tests for the heavier CLI commands: stats, index, search, ask."""
 
+import json
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -17,6 +18,7 @@ from kb.cli import (
     cmd_tag,
     cmd_tags,
     cmd_untag,
+    main,
 )
 from kb.api import search_core
 from kb.config import Config
@@ -213,6 +215,38 @@ class TestCmdIndex:
 
 
 class TestCmdSearch:
+    def test_all_local_search_without_api_key(self, populated_db, monkeypatch):
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        populated_db.embed_method = "local"
+        populated_db.hyde_method = "local"
+        populated_db.expand_method = "local"
+        populated_db.query_expand = True
+        populated_db.rerank_method = "cross-encoder"
+        with (
+            patch(
+                "kb.api.OpenAI", side_effect=AssertionError("unexpected OpenAI client")
+            ),
+            patch("kb.embed.local_embed_batch", return_value=[[0.1] * 4] * 2),
+            patch("kb.hyde.local_hyde_passage", return_value=("Install kb.", 0.0)),
+            patch("kb.expand.local_expand", return_value=[]),
+        ):
+            result = search_core("install", populated_db)
+
+        assert result["results"][0]["doc_path"] == "docs/guide.md"
+        assert any("Install kb" in row["text"] for row in result["results"])
+
+    def test_main_fts_json_keeps_config_banner_on_stderr(
+        self, populated_db, monkeypatch, capsys
+    ):
+        monkeypatch.setattr("sys.argv", ["kb", "fts", "install", "--json"])
+        monkeypatch.setattr("kb.cli.find_config", lambda: populated_db)
+        main()
+
+        captured = capsys.readouterr()
+        result = json.loads(captured.out)
+        assert result["results"][0]["doc_path"] == "docs/guide.md"
+        assert f"Config: {populated_db.config_path} [project]" in captured.err
+
     def test_no_db_exits(self, tmp_path):
         cfg = Config()
         cfg.db_path = tmp_path / "nonexistent.db"

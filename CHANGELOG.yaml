@@ -2,7 +2,11 @@ releases:
   - version: "unreleased"
     date: null
     added: []
-    fixed: []
+    fixed:
+      - description: "`kb search` no longer requires `OPENAI_API_KEY` when embeddings, HyDE and query expansion are all local; `kb ask` still needs a client for the answer LLM"
+        commits: []
+      - description: "The `Config: …` banner prints to stderr, so `--json` output parses"
+        commits: []
     changed: []
     removed: []
     deprecated: []

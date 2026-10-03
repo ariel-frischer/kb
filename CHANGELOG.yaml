@@ -2,6 +2,18 @@ releases:
   - version: "unreleased"
     date: null
     added: []
+    fixed: []
+    changed: []
+    removed: []
+    deprecated: []
+    breaking: []
+    migration: null
+    contributors: []
+
+  - version: "1.4.2"
+    date: "2026-10-02"
+    summary: "Local-only setups can search without an OpenAI API key, and `--json` output is clean JSON again because the config banner now goes to stderr."
+    added: []
     fixed:
       - description: "`kb search` no longer requires `OPENAI_API_KEY` when embeddings, HyDE and query expansion are all local; `kb ask` still needs a client for the answer LLM"
         commits: []
